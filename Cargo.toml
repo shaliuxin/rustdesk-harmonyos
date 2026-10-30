@@ -51,13 +51,23 @@ screencapturekit = ["cpal/screencapturekit"]
 
 [dependencies]
 async-trait = "0.1"
-scrap = { path = "libs/scrap", features = ["wayland"] }
-hbb_common = { path = "libs/hbb_common", features = ["webrtc"] }
 base = { path = "libs/base" }
 serde_derive = "1.0"
 serde = "1.0"
 serde_json = "1.0"
 serde_repr = "0.1"
+
+# --- OpenHarmony 目标分流（Tier-3 #3，见 docs/ohos/PATCH_INVENTORY.md）---
+# WebRTC 依赖链（webrtc-util 0.11 → nix 0.26.4）不兼容 target_env="ohos" 的 libc 类型定义，
+# 且 scrap 的 wayland feature 在鸿蒙无意义。鸿蒙先走 TCP/KCP 传输，
+# WebRTC 待 vendored webrtc-util fork 补回（参考 docs/ohos/ARCHITECTURE.md §9）。
+[target.'cfg(not(target_env = "ohos"))'.dependencies]
+scrap = { path = "libs/scrap", features = ["wayland"] }
+hbb_common = { path = "libs/hbb_common", features = ["webrtc"] }
+
+[target.'cfg(target_env = "ohos")'.dependencies]
+scrap = { path = "libs/scrap" }
+hbb_common = { path = "libs/hbb_common" }
 cfg-if = "1.0"
 lazy_static = "1.4"
 sha2 = "0.10"
@@ -95,7 +105,7 @@ reqwest = { version = "0.12", features = ["blocking", "socks", "json", "native-t
 cpal = { git = "https://github.com/rustdesk-org/cpal", branch = "osx-screencapturekit" }
 ringbuf = "0.3"
 
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 mac_address = "1.1"
 sciter-rs = { git = "https://github.com/rustdesk-org/rust-sciter", branch = "dyn" }
 sys-locale = "0.3"

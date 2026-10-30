@@ -7,6 +7,7 @@
 |---|---|---|---|---|---|
 | 1 | `src/platform/mod.rs` | 注册 `ohos` 模块；把 `linux` / `gtk_sudo` 的 cfg 加上 `not(target_env = "ohos")` | 9 | 平台选择必须在编译期发生，无法用新增文件绕开 | 低（该文件极少改动） |
 | 2 | `.cargo/config.toml` | 文件末尾追加 `[target.aarch64-unknown-linux-ohos]` 与 `[env]` 段 | 18 | 交叉编译工具链配置只能放这里 | 低（追在末尾） |
+| 3 | `Cargo.toml` | 把 `scrap` / `hbb_common` 从 `[dependencies]` 移到按目标分流的两个 `[target.'cfg(...)'.dependencies]` 段；鸿蒙不带 `webrtc`/`wayland` feature | 16 | WebRTC 链路（`webrtc-util 0.11 → nix 0.26.4`）在 OHOS 上报 51 个 libc 类型错误，无法在新文件里解决；feature 只能在此声明 | 中（上游若改动这两行依赖） |
 
 ## 不提交的改动（生成式，Tier-2）
 
