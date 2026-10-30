@@ -52,22 +52,12 @@ screencapturekit = ["cpal/screencapturekit"]
 [dependencies]
 async-trait = "0.1"
 base = { path = "libs/base" }
+# 全局键鼠钩子。OHOS 上由 ohos/third_party/rdev 的空后端满足 API，见文件末尾的 [patch]。
+rdev = { git = "https://github.com/rustdesk-org/rdev" }
 serde_derive = "1.0"
 serde = "1.0"
 serde_json = "1.0"
 serde_repr = "0.1"
-
-# --- OpenHarmony 目标分流（Tier-3 #3，见 docs/ohos/PATCH_INVENTORY.md）---
-# WebRTC 依赖链（webrtc-util 0.11 → nix 0.26.4）不兼容 target_env="ohos" 的 libc 类型定义，
-# 且 scrap 的 wayland feature 在鸿蒙无意义。鸿蒙先走 TCP/KCP 传输，
-# WebRTC 待 vendored webrtc-util fork 补回（参考 docs/ohos/ARCHITECTURE.md §9）。
-[target.'cfg(not(target_env = "ohos"))'.dependencies]
-scrap = { path = "libs/scrap", features = ["wayland"] }
-hbb_common = { path = "libs/hbb_common", features = ["webrtc"] }
-
-[target.'cfg(target_env = "ohos")'.dependencies]
-scrap = { path = "libs/scrap" }
-hbb_common = { path = "libs/hbb_common" }
 cfg-if = "1.0"
 lazy_static = "1.4"
 sha2 = "0.10"
@@ -87,7 +77,6 @@ default-net = "0.14"
 wol-rs = "1.0"
 flutter_rust_bridge = { version = "=1.80", features = ["uuid"], optional = true}
 errno = "0.3"
-rdev = { git = "https://github.com/rustdesk-org/rdev" }
 url = { version = "2.3", features = ["serde"] }
 crossbeam-queue = "0.3"
 hex = "0.4"
@@ -98,7 +87,21 @@ shutdown_hooks = "0.1"
 totp-rs = { version = "5.4", default-features = false, features = ["gen_secret", "otpauth"] }
 stunclient = "0.4"
 kcp-sys= { git = "https://github.com/rustdesk-org/kcp-sys", branch = "rustdesk-patches" }
-reqwest = { version = "0.12", features = ["blocking", "socks", "json", "native-tls", "rustls-tls", "rustls-tls-native-roots", "gzip", "zstd"], default-features=false }
+reqwest = { version = "0.12", features = ["blocking", "socks", "json", "rustls-tls", "rustls-tls-native-roots", "gzip", "zstd"], default-features=false }
+
+# --- OpenHarmony 目标分流（Tier-3 #3，见 docs/ohos/PATCH_INVENTORY.md）---
+# WebRTC 依赖链（webrtc-util 0.11 → nix 0.26.4）不兼容 target_env="ohos" 的 libc 类型定义，
+# scrap 的 wayland feature 在鸿蒙无意义，rdev 在 linux 上拉 x11。鸿蒙先走 TCP/KCP 传输。
+[target.'cfg(not(target_env = "ohos"))'.dependencies]
+scrap = { path = "libs/scrap", features = ["wayland"] }
+hbb_common = { path = "libs/hbb_common", features = ["webrtc"] }
+
+[target.'cfg(target_env = "ohos")'.dependencies]
+# linux-pkg-config：走 pkg-config（ohos/sysroot/aarch64）而非 vcpkg —— vcpkg 无 ohos triplet
+scrap = { path = "libs/scrap", features = ["linux-pkg-config"] }
+hbb_common = { path = "libs/hbb_common", features = ["webrtc"] }
+magnum-opus = { git = "https://github.com/rustdesk-org/magnum-opus", features = ["linux-pkg-config"] }
+
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # https://github.com/rustdesk/rustdesk/discussions/10197, not use cpal on linux
@@ -178,15 +181,15 @@ piet = "0.6"
 piet-coregraphics = "0.6"
 foreign-types = "0.3"
 
-[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
+[target.'cfg(all(any(target_os = "macos", target_os = "linux", target_os = "windows"), not(target_env = "ohos")))'.dependencies]
 tray-icon = { git = "https://github.com/tauri-apps/tray-icon", version = "0.21.3" }
 tao = { git = "https://github.com/rustdesk-org/tao", branch = "dev" }
 image = "0.24"
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+[target.'cfg(all(any(target_os = "macos", target_os = "linux"), not(target_env = "ohos")))'.dependencies]
 keepawake = { git = "https://github.com/rustdesk-org/keepawake-rs" }
 
-[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+[target.'cfg(all(any(target_os = "windows", target_os = "linux"), not(target_env = "ohos")))'.dependencies]
 wallpaper = { git = "https://github.com/rustdesk-org/wallpaper.rs" }
 tiny-skia = "0.11"
 softbuffer = "0.4"
@@ -194,7 +197,7 @@ fontdb = "0.23"
 bytemuck = "1.23"
 ttf-parser = "0.25"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 libxdo-sys = "0.11"
 psimple = { package = "libpulse-simple-binding", version = "2.27" }
 pulse = { package = "libpulse-binding", version = "2.27" }
@@ -215,7 +218,7 @@ winit = "0.30"
 wayland-client = "0.31"
 xkbcommon-dl = { version = "0.4", features = ["x11"] }
 
-[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+[target.'cfg(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos")))'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -225,12 +228,27 @@ android-wakelock = { git = "https://github.com/rustdesk-org/android-wakelock" }
 
 [workspace]
 members = ["libs/scrap", "libs/hbb_common", "libs/base", "libs/enigo", "libs/clipboard", "libs/virtual_display", "libs/virtual_display/dylib", "libs/portable", "libs/remote_printer"]
-exclude = ["vdi/host"]
+exclude = ["vdi/host", "ohos/shims/tokio-native-tls", "ohos/third_party/magnum-opus", "ohos/third_party/socket2", "ohos/third_party/nix", "ohos/third_party/rdev"]
 
 # Patch libxdo-sys to use a stub implementation that doesn't require libxdo
 # This allows building and running on systems without libxdo installed (e.g., Wayland-only)
 [patch.crates-io]
 libxdo-sys = { path = "libs/libxdo-sys-stub" }
+# OHOS: native-tls -> openssl-sys 无法交叉编译到 aarch64-unknown-linux-ohos。
+# hbb_common 无条件依赖 tokio-native-tls（wss / 代理 TLS），故用一个 rustls 实现、API 子集相同的替身。
+# 注：Cargo 的 patch 无 per-target 语义，桌面构建也会用这个替身；差异仅在证书根改为 webpki-roots。
+tokio-native-tls = { path = "ohos/shims/tokio-native-tls" }
+# OHOS: socket2 0.4 只为 linux-gnu / linux-musl 定义 IovLen，target_env="ohos" 两边都不匹配。
+# vendored 副本补了一个 `#[cfg(target_env = "ohos")] type IovLen = i32;`。
+socket2 = { path = "ohos/third_party/socket2" }
+# OHOS: nix 0.26.4（webrtc-util 的依赖）假定 libc 提供 aio_*/mq_*/ptrace 等符号，
+# 而 aarch64-linux-ohos 的 libc 没有。vendored 副本把不存在的模块按 target_env 排除，
+# 并修了 3 处类型差异（cmsg_len / SigevThreadId / O_FSYNC）。这些补丁对其他平台不可见。
+nix = { path = "ohos/third_party/nix" }
+# OHOS: 鸿蒙没有 libpulse / PulseAudio 守护进程，音频走 OHAudio（只有 C/C++ 侧能调）。
+# 这两个 crate 的构建脚本要 pkg-config libpulse，在鸿蒙上必然失败；换成只提供
+# 类型与签名的空实现，让 client.rs 里 `#[cfg(target_os = "linux")]` 的播放路径
+# 能编译，运行时空转。
 # Upstream reserves a frame's whole declared length as soon as its header is in, so a header alone
 # buys an allocation the size it names, bounded only by max_frame_size. This fork grows the read
 # buffer one read_buffer_size chunk at a time as the bytes actually arrive. Patched rather than
@@ -302,3 +320,17 @@ rpath = true
 
 [profile.dev]
 debug = 1
+
+# OHOS: magnum-opus 的 build.rs 用编译期 `#[cfg(target_os = "linux")]` 判断是否走 pkg-config，
+# 但 build script 是在【宿主】上编译的（Windows 宿主 => target_os="windows"），永远落到 vcpkg 分支。
+# 上游只在 Linux 宿主交叉编译过，故未暴露。vendored 副本改为按 feature 分派。
+[patch."https://github.com/rustdesk-org/magnum-opus"]
+magnum-opus = { path = "ohos/third_party/magnum-opus" }
+
+[patch."https://github.com/rustdesk-org/rdev"]
+# OHOS: rdev 的 linux 后端依赖 x11/mio/epoll，鸿蒙上都不存在。
+# vendored 副本把 linux 后端按 target_env 排除，并为 ohos 提供签名一致的纯空实现
+# （src/ohos），这样 src/keyboard.rs 里 160 余处 rdev:: 调用点无需任何改动。
+rdev = { path = "ohos/third_party/rdev" }
+
+

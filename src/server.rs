@@ -8,7 +8,12 @@ use std::{
 use bytes::Bytes;
 
 pub use connection::*;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
+use hbb_common::config::Config2;
+// OHOS：Config2 是纯 serde 结构（hbb_common/src/config.rs，无平台 cfg），
+// 鸿蒙上完全可用 —— 上面那条 `not(... ohos ...)` 只是把所有桌面模块一起挡掉了。
+// 上游在 `Server::run` 与 TCP 监听路径里无条件用到 Config2，故单独引入。
+#[cfg(target_env = "ohos")]
 use hbb_common::config::Config2;
 use hbb_common::tcp::{self, new_listener};
 use hbb_common::{
@@ -27,7 +32,7 @@ use hbb_common::{
 };
 use base::message_proto::*;
 use scrap::camera;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use service::ServiceTmpl;
 use service::{EmptyExtraFieldService, GenericService, Service, Subscriber};
 use video_service::VideoSource;
@@ -37,10 +42,10 @@ use crate::ipc::Data;
 pub mod audio_service;
 #[cfg(target_os = "windows")]
 pub mod terminal_helper;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub mod terminal_service;
 cfg_if::cfg_if! {
-if #[cfg(not(target_os = "ios"))] {
+if #[cfg(not(any(target_os = "ios", target_env = "ohos")))] {
 mod clipboard_service;
 #[cfg(target_os = "android")]
 pub use clipboard_service::is_clipboard_service_ok;
@@ -63,11 +68,67 @@ pub const NAME: &'static str = "";
 }
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 pub mod input_service {
     pub const NAME_CURSOR: &'static str = "";
     pub const NAME_POS: &'static str = "";
     pub const NAME_WINDOW_FOCUS: &'static str = "";
+
+    // OHOS：上面的 cfg_if 把鸿蒙划进了「无输入服务」一侧（`input_service.rs`
+    // 依赖 enigo / xdo / uinput / rdp_input，鸿蒙上都不存在；真正的输入注入由
+    // C++ 侧 OH_Input 经 rdev 空后端完成）。
+    //
+    // 但上游仍有若干 `#[cfg(target_os = "linux")]` 块会引用下面这几个函数 ——
+    // 因为鸿蒙的 target_os 就是 "linux"。补上同名空实现，让这些调用点不必改 cfg。
+    #[cfg(target_env = "ohos")]
+    pub fn clear_remapped_keycode() {}
+
+    #[cfg(target_env = "ohos")]
+    pub fn fix_key_down_timeout_at_exit() {}
+
+    #[cfg(target_env = "ohos")]
+    pub fn fix_key_down_timeout_loop() {}
+
+    #[cfg(target_env = "ohos")]
+    pub fn release_device_modifiers() {}
+
+    /// 是否用 RDP 输入通道（Wayland 下 uinput 不可用时的退路）。鸿蒙不走这条路。
+    #[cfg(target_env = "ohos")]
+    pub fn wayland_use_rdp_input() -> bool {
+        false
+    }
+
+    /// 是否用 uinput 注入。鸿蒙没有 /dev/uinput。
+    #[cfg(target_env = "ohos")]
+    pub fn wayland_use_uinput() -> bool {
+        false
+    }
+
+    /// 建立 RDP 输入通道。鸿蒙不走 Wayland 门户，不可能被调用；仅为符号完整。
+    #[cfg(target_env = "ohos")]
+    pub async fn setup_rdp_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+}
+
+/// OHOS：`src/server/wayland.rs` 管理 xdg-desktop-portal 会话（屏幕共享授权、
+/// 远程桌面令牌）。鸿蒙没有 portal，采集走 AVScreenCapture。
+///
+/// 上游在 `#[cfg(target_os = "linux")]` 块里调用 `wayland::clear()` /
+/// `wayland::init()` / `wayland::common_get_error()` /
+/// `wayland::try_close_portal_session()`，这里给同名空模块，调用点零改动。
+#[cfg(target_env = "ohos")]
+pub(crate) mod wayland {
+    pub(crate) fn init() {}
+
+    pub(crate) fn clear() {}
+
+    pub(crate) fn common_get_error() -> String {
+        String::new()
+    }
+
+    pub(crate) fn try_close_portal_session() {}
 }
 
 mod connection;
@@ -139,6 +200,7 @@ pub fn new() -> ServerPtr {
     #[cfg(not(target_os = "ios"))]
     {
         server.add_service(Box::new(display_service::new()));
+        #[cfg(not(target_env = "ohos"))]
         server.add_service(Box::new(clipboard_service::new(
             clipboard_service::NAME.to_owned(),
         )));
@@ -147,7 +209,7 @@ pub fn new() -> ServerPtr {
             clipboard_service::FILE_NAME.to_owned(),
         )));
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         if !display_service::capture_cursor_embedded() {
             server.add_service(Box::new(input_service::new_cursor()));
@@ -645,7 +707,7 @@ pub fn check_zombie() {
 /// * `is_server` - Whether the current client is definitely the server.
 /// If true, the server will be started.
 /// Otherwise, client will check if there's already a server and start one if not.
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 #[tokio::main]
 pub async fn start_server(_is_server: bool) {
     allow_err!(crate::trusted_devices::initialize());
@@ -660,7 +722,7 @@ pub async fn start_server(_is_server: bool) {
 /// If true, the server will be started.
 /// Otherwise, client will check if there's already a server and start one if not.
 /// * `no_server` - If `is_server` is false, whether to start a server if not found.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 #[tokio::main]
 pub async fn start_server(is_server: bool, no_server: bool) {
     use std::sync::Once;

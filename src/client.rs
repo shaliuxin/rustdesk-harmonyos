@@ -1,4 +1,4 @@
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use crate::clipboard::clipboard_listener::{self, ClipboardEvent};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -39,7 +39,7 @@ use crate::{
 use crate::{clipboard::check_clipboard_files, clipboard_file::unix_file_clip};
 pub use file_trait::FileManager;
 #[cfg(not(feature = "flutter"))]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use hbb_common::tokio::sync::mpsc::UnboundedSender;
 use hbb_common::{
     allow_err,
@@ -85,10 +85,10 @@ use scrap::{
 
 #[cfg(not(target_os = "ios"))]
 use crate::clipboard::CLIPBOARD_INTERVAL;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use crate::clipboard::{check_clipboard, ClipboardSide};
 #[cfg(not(feature = "flutter"))]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use crate::ui_session_interface::SessionPermissionConfig;
 
 pub use super::lang::*;
@@ -134,11 +134,11 @@ pub const SCRAP_X11_REF_URL: &str = "https://rustdesk.com/docs/en/manual/linux/#
 pub const AUDIO_BUFFER_MS: usize = 3000;
 
 #[cfg(feature = "flutter")]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub(crate) struct ClientClipboardContext;
 
 #[cfg(not(feature = "flutter"))]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub(crate) struct ClientClipboardContext {
     pub cfg: SessionPermissionConfig,
     pub tx: UnboundedSender<Data>,
@@ -163,7 +163,7 @@ lazy_static::lazy_static! {
     static ref AUDIO_HOST: Host = cpal::default_host();
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 lazy_static::lazy_static! {
     static ref ENIGO: Arc<Mutex<enigo::Enigo>> = Arc::new(Mutex::new(enigo::Enigo::new()));
 }
@@ -175,7 +175,7 @@ lazy_static::lazy_static! {
 
 const PUBLIC_SERVER: &str = "public";
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub fn get_key_state(key: enigo::Key) -> bool {
     use enigo::KeyboardControllable;
     #[cfg(target_os = "macos")]
@@ -1900,7 +1900,7 @@ impl Client {
         if crate::flutter::sessions::has_connected_sessions_running(ConnType::DEFAULT_CONN) {
             return;
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_env = "ohos")))]
         clipboard_listener::unsubscribe(Self::CLIENT_CLIPBOARD_NAME);
         CLIPBOARD_STATE.lock().unwrap().running = false;
         #[cfg(all(feature = "unix-file-copy-paste", target_os = "linux"))]
@@ -1919,7 +1919,7 @@ impl Client {
     // After all sessions are end, the loop exists.
     //
     // If clipboard update is detected, the text will be sent to all sessions by `send_clipboard_msg`.
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     fn try_start_clipboard(
         _client_clip_ctx: Option<ClientClipboardContext>,
     ) -> Option<UnboundedReceiver<()>> {
@@ -2029,14 +2029,14 @@ impl ClipboardState {
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 struct ClientClipboardHandler {
     ctx: Option<crate::clipboard::ClipboardContext>,
     #[cfg(not(feature = "flutter"))]
     client_clip_ctx: Option<ClientClipboardContext>,
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 impl ClientClipboardHandler {
     fn is_text_required(&self) -> bool {
         #[cfg(feature = "flutter")]
@@ -2136,12 +2136,26 @@ impl ClientClipboardHandler {
     }
 }
 
+/// OHOS：PulseAudio 的占位替身。鸿蒙没有 PulseAudio 服务，`start_audio`
+/// 在鸿蒙上是空实现，因此这个 sink 永远不会被创建或被写入。
+#[cfg(target_env = "ohos")]
+#[derive(Default)]
+struct OhosAudioSink;
+
+#[cfg(target_env = "ohos")]
+impl OhosAudioSink {
+    fn write(&mut self, _data: &[u8]) {}
+}
+
 /// Audio handler for the [`Client`].
 #[derive(Default)]
 pub struct AudioHandler {
     audio_decoder: Option<(AudioDecoder, Vec<f32>)>,
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     simple: Option<psimple::Simple>,
+    /// OHOS：PulseAudio 占位。start_audio 是空实现，永远不会被写入。
+    #[cfg(target_env = "ohos")]
+    simple: Option<OhosAudioSink>,
     #[cfg(not(target_os = "linux"))]
     audio_buffer: AudioBuffer,
     #[cfg(not(target_os = "linux"))]
@@ -2342,7 +2356,13 @@ impl AudioBuffer {
 }
 
 impl AudioHandler {
-    #[cfg(target_os = "linux")]
+    /// OHOS：音频播放由 OHAudio（C++ 侧）接管，Rust 侧暂不参与。
+    #[cfg(target_env = "ohos")]
+    fn start_audio(&mut self, _format0: AudioFormat) -> ResultType<()> {
+        Ok(())
+    }
+
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     fn start_audio(&mut self, format0: AudioFormat) -> ResultType<()> {
         use psimple::Simple;
         use pulse::sample::{Format, Spec};
@@ -2387,7 +2407,7 @@ impl AudioHandler {
         log::info!("Remote input format: {:?}", format0);
         #[allow(unused_mut)]
         let mut config: StreamConfig = config.into();
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
         {
             // this makes ios and android audio output not work
             config.buffer_size = cpal::BufferSize::Fixed(64);
@@ -2867,7 +2887,7 @@ pub struct LoginConfigHandler {
     pub received: bool,
     switch_uuid: Option<String>,
     #[cfg(feature = "flutter")]
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     switch_back_allowed: bool,
     pub save_ab_password_to_recent: bool, // true: connected with ab password
     pub other_server: Option<(String, String, String)>,
@@ -2992,7 +3012,7 @@ impl LoginConfigHandler {
         self.direct = None;
         self.received = false;
         #[cfg(feature = "flutter")]
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
         {
             self.switch_back_allowed = false;
         }
@@ -3010,13 +3030,13 @@ impl LoginConfigHandler {
     }
 
     #[cfg(feature = "flutter")]
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     pub fn allow_switch_back_once(&mut self) {
         self.switch_back_allowed = true;
     }
 
     #[cfg(feature = "flutter")]
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     pub fn consume_switch_back_permission(&mut self) -> bool {
         if self.switch_back_allowed {
             self.switch_back_allowed = false;
@@ -4548,7 +4568,7 @@ pub fn handle_login_error(
 // "Switch sides" requires the incoming-only client to connect back to its
 // controlling peer; verify the local pending uuid before opening the connection.
 #[cfg(feature = "flutter")]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 async fn is_switch_sides_back(conn_type: ConnType, interface: &impl Interface) -> bool {
     if conn_type != ConnType::DEFAULT_CONN {
         return false;
@@ -4582,13 +4602,13 @@ async fn is_switch_sides_back(conn_type: ConnType, interface: &impl Interface) -
     lc.id == id && current_uuid.as_ref() == Some(&uuid)
 }
 
-#[cfg(not(all(feature = "flutter", not(any(target_os = "android", target_os = "ios")))))]
+#[cfg(not(all(feature = "flutter", not(any(target_os = "android", target_os = "ios", target_env = "ohos")))))]
 async fn is_switch_sides_back(_conn_type: ConnType, _interface: &impl Interface) -> bool {
     false
 }
 
 #[cfg(feature = "flutter")]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 async fn request_local_switch_sides_uuid(
     id: &str,
     uuid: &Uuid,
@@ -4645,7 +4665,7 @@ pub async fn handle_hash(
 
     // switch_uuid
     #[cfg(feature = "flutter")]
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         let uuid = lc.write().unwrap().switch_uuid.take();
         if let Some(uuid) = uuid {
@@ -5010,7 +5030,7 @@ pub enum Data {
     RejectInsecureConnection,
     Login((String, String, String, bool)),
     Message(Message),
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     InitialClipboard(usize, Option<Message>),
     SendFiles((i32, JobType, String, String, i32, bool, bool)),
     RemoveDirAll((i32, String, bool, bool)),

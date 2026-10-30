@@ -60,3 +60,20 @@ flutter/web/
 /third_party/libdrmtap/
 # Local git worktrees
 .worktrees/
+
+# === OpenHarmony 移植（added by ohos port）===
+# 交叉编译日志、自建 sysroot、CMake 中间产物
+build-*.log
+/ohos/sysroot/
+/ohos/build/
+# 第三方源码：由 ohos/*.sh 下载/解压得到，不进 git（体积 >100M）。
+# ohos/third_party 下保留的是我们自己维护的 crate：magnum-opus、nix、rdev、socket2。
+/ohos/third_party/aom/
+/ohos/third_party/libvpx/
+/ohos/third_party/opus/
+/ohos/third_party/libyuv/
+/ohos/third_party/libsodium/
+/ohos/third_party/conf*
+/ohos/third_party/config.*
+/ohos/third_party/conftest*
+/ohos/sodium-link/

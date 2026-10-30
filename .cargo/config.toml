@@ -21,15 +21,36 @@ git-fetch-with-cli = true
 # 产物为 staticlib，由 C++ libentry.so 链接；此处主要供 bindgen / cc 构建的 -sys crate 使用。
 # 换机器只需改下列 DevEco SDK 路径。
 [target.aarch64-unknown-linux-ohos]
-ar = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+ar = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+# crate-type 同时包含 cdylib/staticlib，即使只要 .a，cargo 也会走一遍链接。
+# 不能把 ohos/cc-ohos.sh 当 linker：Windows 无法直接 exec shell 脚本（os error 193）。
+# 这里直接用 clang 作为链接器驱动，target/sysroot 通过 link-arg 补上。
+linker = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
+rustflags = [
+    "-Clink-arg=--target=aarch64-linux-ohos",
+    "-Clink-arg=--sysroot=C:/ohos-sdk/default/openharmony/native/sysroot",
+]
 
 [target.x86_64-unknown-linux-ohos]
-ar = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+ar = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+linker = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
+rustflags = [
+    "-Clink-arg=--target=aarch64-linux-ohos",
+    "-Clink-arg=--sysroot=C:/ohos-sdk/default/openharmony/native/sysroot",
+]
 
 [env]
-LIBCLANG_PATH = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/lib"
-CC_aarch64_unknown_linux_ohos = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/clang.exe"
-AR_aarch64_unknown_linux_ohos = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
-CXX_aarch64_unknown_linux_ohos = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/clang++.exe"
-CFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/sysroot"
-CXXFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/sysroot"
+LIBCLANG_PATH = "C:/ohos-sdk/default/openharmony/native/llvm/lib"
+CC_aarch64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
+AR_aarch64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+CXX_aarch64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang++.exe"
+CFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot"
+CXXFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot"
+# --- 第三方 C 库查找：vpx / aom / libyuv / opus 均由 ohos/build-third-party 交叉编译到该前缀 ---
+PKG_CONFIG = "C:/Program Files/pkgconf-3.0.8/pkgconf.exe"
+PKG_CONFIG_PATH = "C:/Users/mingh/WorkBuddy/2026-10-30-16-57-08/rustdesk/ohos/sysroot/aarch64/lib/pkgconfig"
+PKG_CONFIG_ALLOW_CROSS = "1"
+# bindgen 需要自己的一份额外 clang 参数：stddef.h 等系统头只在 sysroot 里，
+# 而 opus/vpx/aom 的头在我们自建的 prefix 里（magnum-opus 的 opus_ffi.h 会 #include <opus/opus_multistream.h>）。
+BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__ -IC:/Users/mingh/WorkBuddy/2026-10-30-16-57-08/rustdesk/ohos/sysroot/aarch64/include"
+BINDGEN_EXTRA_CLANG_ARGS = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__ -IC:/Users/mingh/WorkBuddy/2026-10-30-16-57-08/rustdesk/ohos/sysroot/aarch64/include"

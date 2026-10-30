@@ -2,19 +2,23 @@
 use crate::flutter;
 #[cfg(target_os = "windows")]
 use crate::platform::windows::{get_char_from_vk, get_unicode_from_vk};
-#[cfg(not(feature = "flutter"))]
+#[cfg(all(not(feature = "flutter"), not(target_env = "ohos")))]
 use crate::ui::CUR_SESSION;
 use crate::ui_session_interface::{InvokeUiSession, Session};
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use crate::{client::get_key_state, common::GrabState};
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
+use hbb_common::log;
+#[cfg(target_env = "ohos")]
 use hbb_common::log;
 use base::message_proto::*;
 use hbb_common::SessionID;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use rdev::KeyCode;
 use rdev::{Event, EventType, Key};
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_env = "ohos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::HashMap,
@@ -61,7 +65,7 @@ pub fn set_relative_mouse_mode_state(active: bool) {
 }
 
 #[cfg(feature = "flutter")]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 static IS_RDEV_ENABLED: AtomicBool = AtomicBool::new(false);
 
 lazy_static::lazy_static! {
@@ -157,7 +161,7 @@ pub mod client {
         *lock = true;
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     pub fn change_grab_status(state: GrabState, keyboard_mode: &str, session_id: u128) {
         #[cfg(feature = "flutter")]
         if !IS_RDEV_ENABLED.load(Ordering::SeqCst) {
@@ -479,7 +483,7 @@ pub mod client {
     }
 
     #[inline]
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     pub fn lock_screen() {
         send_key_event(&event_lock_screen());
     }
@@ -499,7 +503,7 @@ pub mod client {
     }
 
     #[inline]
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     pub fn ctrl_alt_del() {
         send_key_event(&event_ctrl_alt_del(&get_peer_platform()));
     }
@@ -521,7 +525,13 @@ static mut IS_0X021D_DOWN: bool = false;
 #[cfg(target_os = "macos")]
 static mut IS_LEFT_OPTION_DOWN: bool = false;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+/// OHOS：没有 sciter 会话可查，键盘始终按直通码（legacy）解释。
+#[cfg(target_env = "ohos")]
+fn get_keyboard_mode() -> String {
+    "legacy".to_string()
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn get_keyboard_mode() -> String {
     #[cfg(not(feature = "flutter"))]
     if let Some(session) = CUR_SESSION.lock().unwrap().as_ref() {
@@ -946,7 +956,7 @@ fn parse_add_lock_modes_modifiers(
     // }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn add_lock_modes_modifiers(key_event: &mut KeyEvent, is_numpad_key: bool, is_letter_key: bool) {
     if is_letter_key && get_key_state(enigo::Key::CapsLock) {
         key_event.modifiers.push(ControlKey::CapsLock.into());
@@ -956,7 +966,7 @@ fn add_lock_modes_modifiers(key_event: &mut KeyEvent, is_numpad_key: bool, is_le
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub fn convert_numpad_keys(key: Key) -> Key {
     if get_key_state(enigo::Key::NumLock) {
         return key;
@@ -1022,11 +1032,11 @@ pub fn event_to_key_events(
         KeyboardMode::Map => map_keyboard_mode(peer.as_str(), event, key_event),
         KeyboardMode::Translate => translate_keyboard_mode(peer.as_str(), event, key_event),
         _ => {
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
             {
                 legacy_keyboard_mode(event, key_event)
             }
-            #[cfg(any(target_os = "android", target_os = "ios"))]
+            #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
             {
                 Vec::new()
             }
@@ -1040,7 +1050,7 @@ pub fn event_to_key_events(
             if let Some(lock_modes) = _lock_modes {
                 parse_add_lock_modes_modifiers(key_event, lock_modes, is_numpad_key, is_letter_key);
             } else {
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
                 add_lock_modes_modifiers(key_event, is_numpad_key, is_letter_key);
             }
         }
@@ -1049,7 +1059,7 @@ pub fn event_to_key_events(
 }
 
 pub fn send_key_event(key_event: &KeyEvent) {
-    #[cfg(not(feature = "flutter"))]
+    #[cfg(all(not(feature = "flutter"), not(target_env = "ohos")))]
     if let Some(session) = CUR_SESSION.lock().unwrap().as_ref() {
         session.send_key_event(key_event);
     }
@@ -1061,7 +1071,7 @@ pub fn send_key_event(key_event: &KeyEvent) {
 }
 
 pub fn get_peer_platform() -> String {
-    #[cfg(not(feature = "flutter"))]
+    #[cfg(all(not(feature = "flutter"), not(target_env = "ohos")))]
     if let Some(session) = CUR_SESSION.lock().unwrap().as_ref() {
         return session.peer_platform();
     }
@@ -1072,7 +1082,7 @@ pub fn get_peer_platform() -> String {
     "Windows".to_string()
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub fn legacy_keyboard_mode(event: &Event, mut key_event: KeyEvent) -> Vec<KeyEvent> {
     let mut events = Vec::new();
     // legacy mode(0): Generate characters locally, look for keycode on other side.
@@ -1397,7 +1407,7 @@ fn _map_keyboard_mode(_peer: &str, event: &Event, mut key_event: KeyEvent) -> Op
         OS_LOWER_ANDROID => rdev::linux_code_to_android_key_code(event.position_code as _)?,
         _ => event.position_code as _,
     };
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     let keycode = match _peer {
         OS_LOWER_WINDOWS => rdev::usb_hid_code_to_win_scancode(event.usb_hid as _)?,
         OS_LOWER_LINUX => rdev::usb_hid_code_to_linux_code(event.usb_hid as _)?,
@@ -1536,7 +1546,7 @@ pub fn translate_keyboard_mode(peer: &str, event: &Event, key_event: KeyEvent) -
         }
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     if is_numpad_key(&event) {
         events.append(&mut map_keyboard_mode(peer, event, key_event));
         return events;
@@ -1598,7 +1608,7 @@ pub fn keycode_to_rdev_key(keycode: u32) -> Key {
 }
 
 #[cfg(feature = "flutter")]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub mod input_source {
     #[cfg(target_os = "macos")]
     use hbb_common::log;
