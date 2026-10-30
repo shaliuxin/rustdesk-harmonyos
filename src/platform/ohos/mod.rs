@@ -14,6 +14,42 @@ use hbb_common::ResultType;
 
 pub mod ffi;
 
+// --- 主控（控制端）：ArkTS UI ↔ 上游 io_loop 之间的适配层 ---
+//
+// 三个模块的分层（依赖方向自上而下，不反向）：
+//   entry      C ABI 导出，ArkTS/C++ 唯一入口
+//   session    Session<OhosUiSession> 的创建与生命周期，内部复用上游 io_loop
+//   ui_handler InvokeUiSession 的鸿蒙实现：帧槽 + JSON 事件
+pub mod entry;
+pub mod session;
+pub mod ui_handler;
+
+/// 桌面 linux API 的鸿蒙等价物（X11/Wayland/PulseAudio/systemd → 空或降级）。
+///
+/// 上游有大量 `#[cfg(target_os = "linux")]` 块在鸿蒙上会生效，块内路径写死
+/// `crate::platform::linux::xxx`。本模块提供同名同签名的实现，配合下面的
+/// `linux` 别名模块，使这些调用点无需任何改动即可解析。
+pub mod linux_compat;
+
+// 提到 `platform::` 顶层：`src/platform/mod.rs` 的 `pub use ohos::*;` 只搬运
+// 本模块的**直接**成员，不递归进子模块。少了这行，`platform::quit_gui`、
+// `platform::WallPaperRemover`、`platform::install_service` 这些仍然找不到。
+pub use linux_compat::*;
+
+/// 把 [`linux_compat`] 暴露为 `crate::platform::linux`。
+///
+/// `src/platform/mod.rs` 里 `pub use ohos::*;` 会把本模块提到 `platform::linux`，
+/// 而 DESKTOP 的 `pub mod linux;` 已被 `not(target_env = "ohos")` 排除，
+/// 因此不会重名。
+///
+/// 内容 = linux_compat 的全部 + 本模块顶层的账号函数。后者是上游
+/// `crate::platform::linux::get_active_userid()` 这种写法在鸿蒙上的落点
+/// （`src/ipc/auth.rs` 就这样调）。
+pub mod linux {
+    pub use super::get_active_userid;
+    pub use super::linux_compat::*;
+}
+
 pub const PA_SAMPLE_RATE: u32 = 48000;
 
 /// HarmonyOS device form factor. 决定被控端能力上限（见 ARCHITECTURE.md §6）。

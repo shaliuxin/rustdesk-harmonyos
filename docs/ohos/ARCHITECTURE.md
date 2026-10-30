@@ -158,12 +158,50 @@ git commit -m "chore: merge upstream $(date +%F)"
 
 | 阶段 | 交付 | 验收 |
 |---|---|---|
-| **M0 编译地基** | Rust 目标可用，`cargo check` 通过 core 子集 | `librustdesk_core.a` 产出，符号 `rust_main` 存在 |
-| **M1 主控打通** | client.rs 跑通连接 + 解码回调 + 输入发送 | 真机连 Windows 出画面，延迟 <200ms |
+| **M0 编译地基** ✅ | Rust 目标可用，`cargo check` 通过 core 子集 | `librustdesk.a` 产出，`rustdesk_ohos_*` 导出符号存在 |
+| **M1 主控打通** 🚧 | client.rs 跑通连接 + 解码回调 + 输入发送 | 真机连 Windows 出画面，延迟 <200ms |
 | **M2 主控功能** | 文件传输、剪贴板、多屏、画质调优 | 与 Flutter 版功能对照表 ≥80% |
 | **M3 被控（2in1）** | Capturer + enigo::ohos + host 生命周期 | 标准 RustDesk 主控端可连入并操作 |
 | **M4 手机被控（只读）** | 屏幕共享 + 权限降级 | 手机共享屏幕，控制入口隐藏 |
 | **M5 质量** | 长稳/断线重连/安全边界 | 2h 会话无泄漏，权限撤销 1s 内 fail-closed |
+
+### 8.1 Rust 侧已完成（M1 的 ABI 部分）
+
+ArkTS ↔ Rust 的链路已在 Rust 侧闭合，C++ 胶水层与 ArkTS UI 尚未实现：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| C ABI 导出 | `src/platform/ohos/entry.rs` | 19 个 `rustdesk_ohos_*`：init / 会话 / 帧 / 输入 / 采集 |
+| 会话 | `src/platform/ohos/session.rs` | 造 `Session<OhosUiSession>` 并跑上游 `io_loop`（单会话） |
+| UI 适配 | `src/platform/ohos/ui_handler.rs` | 实现 `InvokeUiSession` 48 个方法；帧槽 + JSON 事件 |
+| C ABI 导入 | `src/platform/ohos/ffi.rs` | 19 个 `ohos_*`，由 C++ 实现 |
+
+契约头文件：`ohos/include/rustdesk_ohos.h`（两个方向的完整声明 + 事件名清单）。
+
+**帧的传递模型**（照搬 `flutter::FlutterHandler::on_rgba_soft_render`）：
+
+```
+video_service ──on_rgba(&mut ImageRgb)──▶ 帧槽（mem::swap，零拷贝）
+                                             │ valid=true
+                    ArkTS ──frame_acquire──▶ 拿裸指针 + w/h，建 PixelMap
+                          ──frame_release──▶ valid=false，旧缓冲换回管线复用
+```
+
+`valid == true` 期间新帧被丢弃（背压），所以 ArkTS 渲染完必须 release，
+否则画面会停住——这是唯一的使用约束。
+
+**事件通道**：所有 UI 回调序列化成 `{"event":..., "data":{...}}` 交给
+`ohos_ui_event`，由 C++ 用 napi threadsafe function 切到主线程。
+另外 `rustdesk_ohos_state_json()` 提供「电平触发」的状态快照，
+供页面重建后恢复 UI（只靠事件会丢状态）。
+
+### 8.2 M1 剩余
+
+1. **C++ 胶水层**：实现 `ohos/include/rustdesk_ohos.h` 里那 19 个 `ohos_*`
+   （DeviceInfo / Pasteboard / DisplayManager / OH_Input / AVScreenCapture / hilog）。
+2. **ArkTS UI**：输入页、手势→`rustdesk_ohos_mouse` 的换算、XComponent 渲染循环。
+3. **真机验证**：连 Windows 出画面 + 触摸操作，测延迟。
+
 
 ---
 
