@@ -1,0 +1,24 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "RustDesk 远程桌面"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "RustDesk 远程桌面"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "RustDesk"
+    },
+    {
+      "name": "reason_internet",
+      "value": "连接远程桌面需要网络访问"
+    },
+    {
+      "name": "reason_network_info",
+      "value": "用于判断当前网络类型以选择直连或中继"
+    }
+  ]
+}

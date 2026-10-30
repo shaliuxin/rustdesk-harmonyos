@@ -1,0 +1,13 @@
+{
+  "modelVersion": "6.0.0",
+  "name": "rustdesk_ohos",
+  "version": "0.1.0",
+  "description": "RustDesk for HarmonyOS —— ArkTS UI + C++ 胶水层 + Rust 核心",
+  "main": "",
+  "author": "",
+  "license": "AGPL-3.0",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.19"
+  }
+}

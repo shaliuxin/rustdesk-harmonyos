@@ -76,4 +76,20 @@ build-*.log
 /ohos/third_party/conf*
 /ohos/third_party/config.*
 /ohos/third_party/conftest*
+
+# DevEco / hvigor 构建产物与本地配置
+/ohos-app/**/build/
+/ohos-app/**/.hvigor/
+/ohos-app/**/.cxx/
+/ohos-app/**/oh_modules/
+/ohos-app/local.properties
+/ohos-app/.idea/
+/ohos-app/.hvigor/
+/ohos-app/oh_modules/
 /ohos/sodium-link/
+
+# cargo 对 vendored crate 打的标记，不该进版本库
+.cargo-ok
+
+# 应用图标必须进库（上游的 *png 规则是给截图用的）
+!/ohos-app/**/*.png
