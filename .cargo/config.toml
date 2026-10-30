@@ -16,3 +16,20 @@ rustflags = [
 #]
 [net]
 git-fetch-with-cli = true
+
+# === OpenHarmony / HarmonyOS NEXT (added by ohos port, keep at end of file) ===
+# 产物为 staticlib，由 C++ libentry.so 链接；此处主要供 bindgen / cc 构建的 -sys crate 使用。
+# 换机器只需改下列 DevEco SDK 路径。
+[target.aarch64-unknown-linux-ohos]
+ar = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+
+[target.x86_64-unknown-linux-ohos]
+ar = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+
+[env]
+LIBCLANG_PATH = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/lib"
+CC_aarch64_unknown_linux_ohos = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/clang.exe"
+AR_aarch64_unknown_linux_ohos = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+CXX_aarch64_unknown_linux_ohos = "C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/llvm/bin/clang++.exe"
+CFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/sysroot"
+CXXFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/Program Files/Huawei/DevEco Studio/sdk/default/openharmony/native/sysroot"

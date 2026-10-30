@@ -1,5 +1,7 @@
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub use linux::*;
+#[cfg(all(target_os = "linux", target_env = "ohos"))]
+pub use ohos::*;
 #[cfg(target_os = "macos")]
 pub use macos::*;
 #[cfg(windows)]
@@ -17,10 +19,13 @@ pub mod macos;
 #[cfg(target_os = "macos")]
 pub mod delegate;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub mod linux;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_env = "ohos"))]
+pub mod ohos;
+
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub mod gtk_sudo;
 
 #[cfg(target_os = "android")]
