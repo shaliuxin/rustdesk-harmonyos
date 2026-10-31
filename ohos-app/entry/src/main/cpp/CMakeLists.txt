@@ -28,27 +28,51 @@ elseif(OHOS_ARCH STREQUAL "x86_64")
     set(_rust_target "x86_64-unknown-linux-ohos")
     set(_sys_arch "x86_64")
 else()
-    message(FATAL_ERROR "不支持的 OHOS_ARCH：${OHOS_ARCH}")
+    message(FATAL_ERROR "Unsupported OHOS_ARCH: ${OHOS_ARCH}")
 endif()
 
-# 默认用 release：debug 的 .a 有 648MB，DevEco 链接会跑到内存爆掉。
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(_rust_profile "debug")
+# Rust 库的 profile 选择
+# ---------------------------------------------------------------------------
+# DevEco 的 Debug 配置也会走本文件（CMAKE_BUILD_TYPE=Debug），但 Rust 侧
+# debug 的 .a 有 ~648MB，链接时 ld.lld 很容易把内存吃爆；而且我们只按
+# release 构建 Rust 库（Rust 优化级别对运行性能影响很大）。
+# 所以：先用 RUSTDESK_PROFILE 显式指定（release/debug），否则 Debug 构建
+# 优先复用现成的 release 库，只有 release 不存在时才回退到 debug。
+if(DEFINED RUSTDESK_PROFILE)
+    set(_rust_candidates "${RUSTDESK_PROFILE}")
+elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(_rust_candidates "release" "debug")   # 顺序即优先级
 else()
-    set(_rust_profile "release")
+    set(_rust_candidates "release" "debug")
 endif()
 
 if(NOT DEFINED RUSTDESK_LIB)
-    set(RUSTDESK_LIB
-        "${REPO_ROOT}/target/${_rust_target}/${_rust_profile}/liblibrustdesk.a")
+    foreach(_cand ${_rust_candidates})
+        set(_cand_lib "${REPO_ROOT}/target/${_rust_target}/${_cand}/liblibrustdesk.a")
+        if(EXISTS "${_cand_lib}")
+            set(RUSTDESK_LIB "${_cand_lib}")
+            set(_rust_profile "${_cand}")
+            break()
+        endif()
+    endforeach()
+    if(NOT DEFINED RUSTDESK_LIB)
+        set(_tried "")
+        foreach(_cand ${_rust_candidates})
+            string(APPEND _tried "  ${REPO_ROOT}/target/${_rust_target}/${_cand}/liblibrustdesk.a\n")
+        endforeach()
+        message(FATAL_ERROR
+            "Rust static library not found. Tried:\n${_tried}"
+            "Build it first: OHOS_TARGET=${_rust_target} bash scripts/ohos/build-core.sh release\n"
+            "Or pass -DRUSTDESK_LIB=/abs/path/liblibrustdesk.a")
+    endif()
+else()
+    # 显式 -DRUSTDESK_LIB：从路径反推 profile，C 依赖（kcp/ring/...）要用同一个
+    get_filename_component(_rust_profile "${RUSTDESK_LIB}" DIRECTORY)
+    get_filename_component(_rust_profile "${_rust_profile}" NAME)
 endif()
 
-if(NOT EXISTS "${RUSTDESK_LIB}")
-    message(FATAL_ERROR
-        "找不到 Rust 静态库：${RUSTDESK_LIB}\n"
-        "请先执行：OHOS_TARGET=${_rust_target} bash scripts/ohos/build-core.sh ${_rust_profile}\n"
-        "或用 -DRUSTDESK_LIB=/abs/path/liblibrustdesk.a 指定。")
-endif()
+message(STATUS "RustDesk: OHOS_ARCH=${OHOS_ARCH} target=${_rust_target} profile=${_rust_profile}")
+message(STATUS "RustDesk: librustdesk.a=${RUSTDESK_LIB}")
 
 add_library(rustdesk_core STATIC IMPORTED)
 set_target_properties(rustdesk_core PROPERTIES IMPORTED_LOCATION "${RUSTDESK_LIB}")
@@ -82,7 +106,9 @@ list(APPEND _c_deps ${_kcp_a} ${_ring_a} ${_webm_a} ${_zstd_a})
 
 foreach(_dep ${_c_deps})
     if(NOT EXISTS "${_dep}")
-        message(FATAL_ERROR "缺少 Rust 的 C 依赖：${_dep}\n请先执行 bash scripts/ohos/build-core.sh ${_rust_profile}")
+        message(FATAL_ERROR
+            "Missing C dependency of librustdesk.a: ${_dep}\n"
+            "Run: bash scripts/ohos/build-core.sh ${_rust_profile}  (and the C libs for ${_sys_arch})")
     endif()
 endforeach()
 

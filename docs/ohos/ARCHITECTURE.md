@@ -301,3 +301,20 @@ cmake -G Ninja -DOHOS_STL=c++_shared -DOHOS_ARCH=x86_64 -DOHOS_PLATFORM=OHOS \
 |---|---|---|---|
 | arm64-v8a | 225 MB | 58 MB，ELF64 AArch64 | `--no-undefined` 通过 |
 | x86_64 | 223 MB | 61 MB，ELF64 x86-64 | 无第三方未定义符号（仅 napi/hilog 等系统符号 + zstd 弱符号） |
+
+### 10.5 Debug / Release 与 Rust profile 的对应
+
+DevEco 的 **Debug** 配置也会调用同一个 `CMakeLists.txt`（`CMAKE_BUILD_TYPE=Debug`），
+但 Rust 库只按 release 构建（debug 的 `.a` ~648MB，链接易 OOM，且性能差）。
+
+选择顺序：
+
+1. `-DRUSTDESK_PROFILE=debug|release` 显式指定时优先；
+2. 否则依次尝试 `release` → `debug`，取第一个存在的 `liblibrustdesk.a`；
+3. `-DRUSTDESK_LIB=/abs/path` 时从路径反推 profile（保证 kcp/ring/zstd 等
+   build-script 产物取自同一 profile 目录）；
+4. 都不存在才 `FATAL_ERROR`，并把尝试过的路径列出来。
+
+configure 阶段会打印 `RustDesk: OHOS_ARCH=... target=... profile=...`，
+一眼能看出用的是哪套。注意 CMake 的 `message()` 在 hvigor 日志里会按 GBK 解码，
+**中文字符串会乱码**，所以本文件的报错文案统一用英文。
