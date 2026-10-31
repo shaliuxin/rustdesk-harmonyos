@@ -86,7 +86,7 @@ if [[ $FAILED -ne 0 ]]; then
   exit 1
 fi
 
-echo "== [3/3] 链接测试（Rust .a + C++ → .so）=="
+echo "== [3/3] 链接测试（Rust .a + C 依赖 + C++ → .so）=="
 LIB="target/aarch64-unknown-linux-ohos/release/liblibrustdesk.a"
 [[ -f "$LIB" ]] || LIB="target/aarch64-unknown-linux-ohos/debug/liblibrustdesk.a"
 
@@ -99,10 +99,42 @@ if [[ ! -f "$LIB" ]]; then
 fi
 
 echo "  库：$LIB ($(du -h "$LIB" | cut -f1))"
+
+# Rust 静态库的 C 依赖清单必须与 ohos-app/.../CMakeLists.txt 保持一致。
+# cargo build --lib 的 .a 只含 Rust 代码，链接指令要到最终链接才生效。
+PROFILE_DIR="$(dirname "$LIB")"
+CARGO_BUILD="$PROFILE_DIR/build"
+
+C_DEPS=(
+  ohos/sysroot/aarch64/lib/libopus.a    # magnum-opus（音频）
+  ohos/sysroot/aarch64/lib/libyuv.a     # scrap（YUV）
+  ohos/sysroot/aarch64/lib/libvpx.a     # scrap（VP8/VP9）
+  ohos/sysroot/aarch64/lib/libaom.a     # scrap（AV1）
+  ohos/sodium-link/libsodium.a          # hbb_common
+)
+MISSING=0
+for f in "${C_DEPS[@]}"; do
+  if [[ ! -f "$f" ]]; then
+    echo "  缺少 C 依赖：$f（请执行 bash scripts/ohos/build-core.sh release）"
+    MISSING=1
+  fi
+done
+[[ $MISSING -eq 0 ]] || exit 1
+
+# cargo build 输出目录带 hash，用通配定位
+for pat in "kcp-sys-*/out/libkcp.a" "ring-*/out/libring_core_0_*.a" \
+           "webm-sys-*/out/libwebmadapter.a" "zstd-sys-*/out/libzstd.a"; do
+  for f in "$CARGO_BUILD"/$pat; do
+    [[ -f "$f" && "$f" != *_test.a ]] && C_DEPS+=("$f")
+  done
+done
+
+echo "  C 依赖：${#C_DEPS[@]} 个"
 LIBDIR="$NDK/sysroot/usr/lib/aarch64-linux-ohos"
 OUT=$("$CLANG" --target=aarch64-linux-ohos --sysroot="$NDK/sysroot" \
       -shared -fPIC -O2 -o "$TMP/libentry.so" "$TMP"/*.o \
-      -Wl,--start-group "$LIB" -Wl,--end-group \
+      -Wl,--start-group "$LIB" "${C_DEPS[@]}" -Wl,--end-group \
+      -Wl,-Bsymbolic \
       -L"$LIBDIR" \
       -lace_napi.z -lace_ndk.z -lhilog_ndk.z -lnative_window \
       -lnative_display_manager -ldeviceinfo_ndk.z -lohinput \
