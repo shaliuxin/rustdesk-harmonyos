@@ -20,6 +20,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 仓库根目录：ohos-app/entry/src/main/cpp → 上 5 层
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.." ABSOLUTE)
 
+# DevEco 的 OHOS_ARCH（arm64-v8a / x86_64）→ Rust target 与自建 sysroot 子目录
+if(OHOS_ARCH STREQUAL "arm64-v8a")
+    set(_rust_target "aarch64-unknown-linux-ohos")
+    set(_sys_arch "aarch64")
+elseif(OHOS_ARCH STREQUAL "x86_64")
+    set(_rust_target "x86_64-unknown-linux-ohos")
+    set(_sys_arch "x86_64")
+else()
+    message(FATAL_ERROR "不支持的 OHOS_ARCH：${OHOS_ARCH}")
+endif()
+
 # 默认用 release：debug 的 .a 有 648MB，DevEco 链接会跑到内存爆掉。
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(_rust_profile "debug")
@@ -29,13 +40,13 @@ endif()
 
 if(NOT DEFINED RUSTDESK_LIB)
     set(RUSTDESK_LIB
-        "${REPO_ROOT}/target/aarch64-unknown-linux-ohos/${_rust_profile}/liblibrustdesk.a")
+        "${REPO_ROOT}/target/${_rust_target}/${_rust_profile}/liblibrustdesk.a")
 endif()
 
 if(NOT EXISTS "${RUSTDESK_LIB}")
     message(FATAL_ERROR
         "找不到 Rust 静态库：${RUSTDESK_LIB}\n"
-        "请先执行：bash scripts/ohos/build-app.sh ${_rust_profile}\n"
+        "请先执行：OHOS_TARGET=${_rust_target} bash scripts/ohos/build-core.sh ${_rust_profile}\n"
         "或用 -DRUSTDESK_LIB=/abs/path/liblibrustdesk.a 指定。")
 endif()
 
@@ -48,9 +59,9 @@ set_target_properties(rustdesk_core PROPERTIES IMPORTED_LOCATION "${RUSTDESK_LIB
 # cargo build --lib 产出的 .a 只含 Rust 代码；build script 记录的
 # cargo:rustc-link-lib 要到【最终链接】才生效 —— 也就是本文件的 C++ 链接。
 # 缺了它们，ld.lld 会报 undefined symbol: opus_* / yuv_* / vpx_* / aom_* ...
-set(CARGO_BUILD_DIR "${REPO_ROOT}/target/aarch64-unknown-linux-ohos/${_rust_profile}/build")
-set(OHOS_SYSROOT_LIB "${REPO_ROOT}/ohos/sysroot/aarch64/lib")
-set(OHOS_SODIUM_LIB "${REPO_ROOT}/ohos/sodium-link")
+set(CARGO_BUILD_DIR "${REPO_ROOT}/target/${_rust_target}/${_rust_profile}/build")
+set(OHOS_SYSROOT_LIB "${REPO_ROOT}/ohos/sysroot/${_sys_arch}/lib")
+set(OHOS_SODIUM_LIB "${REPO_ROOT}/ohos/sodium-link-${_sys_arch}")
 
 set(_c_deps
     "${OHOS_SYSROOT_LIB}/libopus.a"      # magnum-opus（音频编解码）

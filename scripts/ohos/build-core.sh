@@ -30,15 +30,40 @@ fi
 # 做法：准备一个专用目录，放进两种命名、两种架构的库。
 #   目标侧：rustc 对 `-l static=libsodium` 查找 `liblibsodium.a`
 #   宿主侧：link.exe 接受 `libsodium.lib`
-SODIUM_DIR="$ROOT/ohos/sodium-link"
+# 目标架构 → 自建 sysroot 子目录（aarch64 / x86_64）
+case "$TARGET" in
+  aarch64-unknown-linux-ohos) SYS_ARCH="aarch64" ;;
+  x86_64-unknown-linux-ohos)  SYS_ARCH="x86_64"  ;;
+  *) echo "未知的 OHOS 目标：$TARGET"; exit 1 ;;
+esac
+
+# --- C 交叉编译工具链（build script 型依赖，如 ring/substring 需要）------------
+# cc crate 按目标三元组查 `CC_<target>` 环境变量；不设则回落到宿主 cc，直接失败。
+NDK="${OHOS_NDK:-C:/ohos-sdk/default/openharmony/native}"
+case "$TARGET" in
+  aarch64-unknown-linux-ohos) OHOS_TRIPLE="aarch64-linux-ohos" ;;
+  x86_64-unknown-linux-ohos)  OHOS_TRIPLE="x86_64-linux-ohos"  ;;
+esac
+_TU="$(echo "$TARGET" | tr 'a-z-' 'A-Z_')"
+export CC_${_TU}="$NDK/llvm/bin/clang.exe"
+export CXX_${_TU}="$NDK/llvm/bin/clang++.exe"
+export AR_${_TU}="$NDK/llvm/bin/llvm-ar.exe"
+export CFLAGS_${_TU}="--target=${OHOS_TRIPLE} --sysroot=$NDK/sysroot -D__MUSL__"
+export CXXFLAGS_${_TU}="--target=${OHOS_TRIPLE} --sysroot=$NDK/sysroot -D__MUSL__"
+export RANLIB_${_TU}="$NDK/llvm/bin/llvm-ranlib.exe"
+
+# sodium-link 目录按目标架构分开，避免两种架构互相覆盖
+SODIUM_DIR="$ROOT/ohos/sodium-link-${SYS_ARCH}"
 mkdir -p "$SODIUM_DIR"
 
-if [[ ! -f "$ROOT/ohos/sysroot/aarch64/lib/libsodium.a" ]]; then
-  echo "缺少 ohos/sysroot/aarch64/lib/libsodium.a，请先执行：sh ohos/build-libsodium.sh"
+if [[ ! -f "$ROOT/ohos/sysroot/${SYS_ARCH}/lib/libsodium.a" ]]; then
+  echo "缺少 ohos/sysroot/${SYS_ARCH}/lib/libsodium.a，请先执行对应构建脚本："
+  echo "  aarch64: sh ohos/build-libsodium.sh"
+  echo "  x86_64:  bash ohos/build-libs-x64.sh"
   exit 1
 fi
-cp -f "$ROOT/ohos/sysroot/aarch64/lib/libsodium.a" "$SODIUM_DIR/libsodium.a"
-cp -f "$ROOT/ohos/sysroot/aarch64/lib/libsodium.a" "$SODIUM_DIR/liblibsodium.a"
+cp -f "$ROOT/ohos/sysroot/${SYS_ARCH}/lib/libsodium.a" "$SODIUM_DIR/libsodium.a"
+cp -f "$ROOT/ohos/sysroot/${SYS_ARCH}/lib/libsodium.a" "$SODIUM_DIR/liblibsodium.a"
 
 # 宿主侧用 libsodium-sys 自带的 msvc 预编译库（与本 crate 版本绑定）
 HOST_SODIUM=$(ls "$HOME"/.cargo/registry/src/*/libsodium-sys-0.2.7/msvc/x64/Debug/v142/libsodium.lib 2>/dev/null | head -1)
@@ -50,6 +75,11 @@ cp -f "$HOST_SODIUM" "$SODIUM_DIR/libsodium.lib"
 
 export SODIUM_LIB_DIR="$SODIUM_DIR"
 # 不要设 SODIUM_STATIC：0.2.7 已把它标为 deprecated，设了直接 panic。
+
+# pkg-config 按目标架构解析第三方 C 库（vpx/aom/opus/yuv）。
+# .cargo/config.toml [env] 里的 PKG_CONFIG_PATH 是全局的（aarch64），
+# 进程环境变量优先级更高，这里按 TARGET 覆盖。
+export PKG_CONFIG_PATH="$ROOT/ohos/sysroot/${SYS_ARCH}/lib/pkgconfig"
 
 echo "==> [3/4] 编译 ${TARGET} (${MODE})"
 if [[ "$MODE" == "debug" ]]; then

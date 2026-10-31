@@ -5,9 +5,9 @@
       "path": "./src/main/cpp/CMakeLists.txt",
       "arguments": "",
       "cppFlags": "",
-      // Rust 静态库由 scripts/ohos/build-app.sh 先构建好再传进来。
-      // 三个 ABI 里只有 arm64-v8a 有 Rust 产物（见 docs/ohos/ARCHITECTURE.md）。
-      "abiFilters": ["arm64-v8a"]
+      // Rust 静态库由 scripts/ohos/build-core.sh 先构建好再传进来。
+      // 两个 ABI 都有 Rust 产物：arm64-v8a（真机）与 x86_64（模拟器）。
+      "abiFilters": ["arm64-v8a", "x86_64"]
     }
   },
   "buildOptionSet": [

@@ -66,6 +66,7 @@ flutter/web/
 build-*.log
 /ohos/sysroot/
 /ohos/build/
+/ohos/build-x64/
 # 第三方源码：由 ohos/*.sh 下载/解压得到，不进 git（体积 >100M）。
 # ohos/third_party 下保留的是我们自己维护的 crate：magnum-opus、nix、rdev、socket2。
 /ohos/third_party/aom/
@@ -86,7 +87,11 @@ build-*.log
 /ohos-app/.idea/
 /ohos-app/.hvigor/
 /ohos-app/oh_modules/
+# libsodium 宿主/目标双份链接目录（按架构分目录：sodium-link-aarch64 / sodium-link-x86_64）
 /ohos/sodium-link/
+/ohos/sodium-link-*/
+# 本地工具链（msys2 make/nasm/perl-root），由 ohos/tools/README 说明来源，二进制不进库
+/ohos/tools/
 
 # cargo 对 vendored crate 打的标记，不该进版本库
 .cargo-ok

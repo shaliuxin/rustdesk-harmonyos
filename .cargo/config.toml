@@ -35,7 +35,7 @@ rustflags = [
 ar = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
 linker = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
 rustflags = [
-    "-Clink-arg=--target=aarch64-linux-ohos",
+    "-Clink-arg=--target=x86_64-linux-ohos",
     "-Clink-arg=--sysroot=C:/ohos-sdk/default/openharmony/native/sysroot",
 ]
 
@@ -46,11 +46,19 @@ AR_aarch64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin
 CXX_aarch64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang++.exe"
 CFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot"
 CXXFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot"
+CC_x86_64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
+AR_x86_64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+CXX_x86_64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang++.exe"
+CFLAGS_x86_64_unknown_linux_ohos = "--target=x86_64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot"
+CXXFLAGS_x86_64_unknown_linux_ohos = "--target=x86_64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot"
 # --- 第三方 C 库查找：vpx / aom / libyuv / opus 均由 ohos/build-third-party 交叉编译到该前缀 ---
+# 注意：PKG_CONFIG_PATH 是全局的（cargo [env] 不支持按 target 区分），
+# x86_64 构建时由 scripts/ohos/build-core.sh 按目标架构覆盖此变量。
 PKG_CONFIG = "C:/Program Files/pkgconf-3.0.8/pkgconf.exe"
 PKG_CONFIG_PATH = "C:/Users/mingh/WorkBuddy/2026-10-30-16-57-08/rustdesk/ohos/sysroot/aarch64/lib/pkgconfig"
 PKG_CONFIG_ALLOW_CROSS = "1"
 # bindgen 需要自己的一份额外 clang 参数：stddef.h 等系统头只在 sysroot 里，
 # 而 opus/vpx/aom 的头在我们自建的 prefix 里（magnum-opus 的 opus_ffi.h 会 #include <opus/opus_multistream.h>）。
 BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__ -IC:/Users/mingh/WorkBuddy/2026-10-30-16-57-08/rustdesk/ohos/sysroot/aarch64/include"
+BINDGEN_EXTRA_CLANG_ARGS_x86_64_unknown_linux_ohos = "--target=x86_64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__ -IC:/Users/mingh/WorkBuddy/2026-10-30-16-57-08/rustdesk/ohos/sysroot/x86_64/include"
 BINDGEN_EXTRA_CLANG_ARGS = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__ -IC:/Users/mingh/WorkBuddy/2026-10-30-16-57-08/rustdesk/ohos/sysroot/aarch64/include"

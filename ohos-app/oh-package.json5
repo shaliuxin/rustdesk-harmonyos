@@ -1,5 +1,5 @@
 {
-  "modelVersion": "6.0.0",
+  "modelVersion": "6.1.1",
   "name": "rustdesk_ohos",
   "version": "0.1.0",
   "description": "RustDesk for HarmonyOS —— ArkTS UI + C++ 胶水层 + Rust 核心",

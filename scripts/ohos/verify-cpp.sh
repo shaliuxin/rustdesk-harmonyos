@@ -100,17 +100,21 @@ fi
 
 echo "  库：$LIB ($(du -h "$LIB" | cut -f1))"
 
-# Rust 静态库的 C 依赖清单必须与 ohos-app/.../CMakeLists.txt 保持一致。
-# cargo build --lib 的 .a 只含 Rust 代码，链接指令要到最终链接才生效。
+# 按库路径推断目标架构（aarch64 / x86_64），C 依赖清单与 CMakeLists.txt 保持一致
+case "$LIB" in
+  */aarch64-unknown-linux-ohos/*) SYS_ARCH="aarch64" ;;
+  */x86_64-unknown-linux-ohos/*)  SYS_ARCH="x86_64"  ;;
+  *) echo "  无法从路径识别架构：$LIB"; exit 1 ;;
+esac
 PROFILE_DIR="$(dirname "$LIB")"
 CARGO_BUILD="$PROFILE_DIR/build"
 
 C_DEPS=(
-  ohos/sysroot/aarch64/lib/libopus.a    # magnum-opus（音频）
-  ohos/sysroot/aarch64/lib/libyuv.a     # scrap（YUV）
-  ohos/sysroot/aarch64/lib/libvpx.a     # scrap（VP8/VP9）
-  ohos/sysroot/aarch64/lib/libaom.a     # scrap（AV1）
-  ohos/sodium-link/libsodium.a          # hbb_common
+  "ohos/sysroot/${SYS_ARCH}/lib/libopus.a"    # magnum-opus（音频编解码）
+  "ohos/sysroot/${SYS_ARCH}/lib/libyuv.a"     # scrap（YUV 转换）
+  "ohos/sysroot/${SYS_ARCH}/lib/libvpx.a"     # scrap（VP8/VP9 编解码）
+  "ohos/sysroot/${SYS_ARCH}/lib/libaom.a"     # scrap（AV1 编解码）
+  "ohos/sodium-link-${SYS_ARCH}/libsodium.a"  # hbb_common（加密握手）
 )
 MISSING=0
 for f in "${C_DEPS[@]}"; do

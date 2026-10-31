@@ -147,9 +147,11 @@ feature! {
 }
 // This can be implemented for other platforms as soon as libc
 // provides bindings for them.
+// OHOS(musl) 的 libc 没有 getcontext/setcontext，排除该环境。
 #[cfg(all(
     target_os = "linux",
-    any(target_arch = "s390x", target_arch = "x86", target_arch = "x86_64")
+    any(target_arch = "s390x", target_arch = "x86", target_arch = "x86_64"),
+    not(target_env = "ohos")
 ))]
 feature! {
     #![feature = "ucontext"]
