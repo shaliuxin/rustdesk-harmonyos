@@ -245,3 +245,59 @@ memcpy 因而是一次行对行大拷贝；ArkTS 把 XComponent 的宽高比设�
 | 无线程安全事件通道 | 延迟高 | C++ threadsafe function；Rust 侧暴露 callback 注册 |
 | 被控端 AGC 受限权限审核 | 无法上架 | 先个人侧载（debug Profile），商用再走 AGC |
 | 上游大改（如切换到新 UI 框架） | 适配层失效 | 只依赖协议层与 Service trait，不依赖 UI |
+
+---
+
+## 10. 双架构构建（arm64-v8a + x86_64）
+
+DevEco 模拟器是 **x86_64**，真机/2in1 是 **arm64-v8a**。安装包 ABI 不匹配会报
+`code:9568347 / install parse native so failed`。故 native 栈两套并存，
+`ohos-app/entry/build-profile.json5` 的 `abiFilters` 同时含两者。
+
+### 10.1 架构映射
+
+| DevEco `OHOS_ARCH` | Rust target | sysroot 子目录 | libsodium 链接目录 |
+|---|---|---|---|
+| `arm64-v8a` | `aarch64-unknown-linux-ohos` | `ohos/sysroot/aarch64` | `ohos/sodium-link-aarch64` |
+| `x86_64` | `x86_64-unknown-linux-ohos` | `ohos/sysroot/x86_64` | `ohos/sodium-link-x86_64` |
+
+`CMakeLists.txt` 按 `OHOS_ARCH` 自动推导，两套产物互不覆盖。
+
+### 10.2 构建顺序（每个架构各一遍）
+
+```bash
+# 1) 三方 C 库
+bash ohos/build-libs-x64.sh          # x86_64；ONLY=vpx 可单步重跑
+sh   ohos/build-libsodium.sh         # aarch64 侧的 libsodium（其余原脚本）
+
+# 2) Rust 静态库
+OHOS_TARGET=aarch64-unknown-linux-ohos bash scripts/ohos/build-core.sh release
+OHOS_TARGET=x86_64-unknown-linux-ohos  bash scripts/ohos/build-core.sh release
+
+# 3) 交给 DevEco 构建（自动按 abiFilters 跑两套 CMake）
+#    手动复现链接：
+cmake -G Ninja -DOHOS_STL=c++_shared -DOHOS_ARCH=x86_64 -DOHOS_PLATFORM=OHOS \
+      -DCMAKE_TOOLCHAIN_FILE=<NDK>/build/cmake/ohos.toolchain.cmake \
+      ohos-app/entry/src/main/cpp && ninja
+```
+
+### 10.3 x86_64 专有的坑（都已修，改动记录在此避免重犯）
+
+| 现象 | 根因 | 处理 |
+|---|---|---|
+| `nix` 编译失败：`cannot find function getcontext` | vendored nix 的 `ucontext` 模块只在 x86/x86_64 上编译，而 ohos(musl) 的 libc 没有该函数 | `not(target_env = "ohos")` 排除该模块 |
+| `... is incompatible with elf_x86_64`（libvpx） | out-of-tree 构建靠 vpath 复用了源码树里 aarch64 时代的 `.o` | 构建前 `find . -name '*.o' -delete` |
+| `undefined symbol: vpx_convolve8_vert_neon` | 源码树残留 in-source 生成的 `*_rtcd.h`（ARM 配置，含 NEON 声明），`#include` 优先命中它 | 一并删除 `vp8/vp9/vpx_dsp/vpx_scale_rtcd.h` |
+| vpx `make install` 只打印 `[INSTALL]` 不落盘 | msys2 make + dash 下 install 内部逻辑失效 | 显式 `cp libvpx.a $PREFIX/lib/` |
+| libsodium 链接期 `undefined symbol: ..._sandy2x_implementation` / `..._xmm6_implementation` | `--disable-asm` 关掉了汇编实现，但运行时分发仍引用 | 开启 asm；libtool CPPAS 在 msys2 建不了临时文件 → 手工编译 `salsa20_xmm6-asm.S`、`sandy2x.S` 并写 `.lo` 桩 |
+| `rtcd.pl` 产出 0 字节头文件 | shebang `#!/usr/bin/env perl`，perl-root 里没有 `env.exe` | 把 Git Bash 的 `env.exe` 拷进 `ohos/tools/perl-root/usr/bin/` |
+| aom 报 `Unsupported nasm` | nasm 3.x 的帮助文本不再列 `-Ox` | 补丁 `aom_optimization.cmake` 放行 NASM 3.x |
+
+工具链准备（msys2 make/nasm/perl-root）见 `ohos/tools.README.md`。
+
+### 10.4 验证基线
+
+| 架构 | librustdesk.a | libentry.so | 检查 |
+|---|---|---|---|
+| arm64-v8a | 225 MB | 58 MB，ELF64 AArch64 | `--no-undefined` 通过 |
+| x86_64 | 223 MB | 61 MB，ELF64 x86-64 | 无第三方未定义符号（仅 napi/hilog 等系统符号 + zstd 弱符号） |
