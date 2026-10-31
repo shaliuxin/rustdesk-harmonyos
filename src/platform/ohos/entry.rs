@@ -116,6 +116,100 @@ pub extern "C" fn rustdesk_ohos_string_free(p: *mut c_char) {
 }
 
 // ---------------------------------------------------------------------------
+// 连接配置（自建服务器）
+// ---------------------------------------------------------------------------
+
+/// 与「连哪台服务器」相关的配置项。
+///
+/// 键名必须和上游设置页的字符串**逐字一致**：`Config::get_option` /
+/// `Config::set_option` 就是按这些字面量读写的，写成别的名字只会写进
+/// config 文件却永远没人读，排查起来极其费时。
+///
+/// * `custom-rendezvous-server` —— ID（Rendezvous）服务器，`host` 或 `host:port`
+/// * `relay-server`             —— 中继服务器；留空表示用 ID 服务器下发的地址
+/// * `api-server`               —— API 服务器；留空表示 `http://<ID服务器>:21114`
+/// * `key`                      —— 自建服务器的公钥，即 `id_ed25519.pub` 的内容
+const REMOTE_SERVER_KEYS: [&str; 4] = [
+    "custom-rendezvous-server",
+    "relay-server",
+    "api-server",
+    "key",
+];
+
+/// 读取连接配置（JSON）。调用方负责 `rustdesk_ohos_string_free`。
+///
+/// 除了用户填的四项，额外给出 `effective-rendezvous-server`：它是**实际生效**
+/// 的地址（可能来自编译期内置的定制服务器，而不是用户填的值）。UI 上把它显示
+/// 出来，能省掉「我明明填了却连不上」的一轮排查。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_config_json() -> *mut c_char {
+    let mut obj = serde_json::Map::new();
+    for k in REMOTE_SERVER_KEYS {
+        obj.insert(
+            k.to_owned(),
+            serde_json::Value::String(config::Config::get_option(k)),
+        );
+    }
+    obj.insert(
+        "effective-rendezvous-server".to_owned(),
+        serde_json::Value::String(config::Config::get_rendezvous_server()),
+    );
+    into_c_string(serde_json::Value::Object(obj).to_string())
+}
+
+/// 写入连接配置。`json` 是对象，**只认** [`REMOTE_SERVER_KEYS`] 里的键。
+///
+/// 白名单不是洁癖：这个入口能改任意 Config 项，放开等于给 UI 一把万能钥匙
+/// （比如误写 `stop-service` 或认证相关项）。UI 只需要四项，就只开四项。
+///
+/// 值为空串等于「删除该项，回到默认」，与上游设置页清空输入框的语义一致。
+/// 返回 0 表示全部处理完（个别键被安装期内置配置锁住时会记 warn，但不算失败）。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_config_set(json: *const c_char) -> c_int {
+    let raw = match cstr_arg(json) {
+        Some(v) if !v.trim().is_empty() => v,
+        _ => return set_error("config_set: json is null or empty"),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => return set_error(format!("config_set: bad json: {e}")),
+    };
+    let obj = match parsed.as_object() {
+        Some(o) => o,
+        None => return set_error("config_set: json is not an object"),
+    };
+
+    let mut applied = 0;
+    for (k, v) in obj {
+        if !REMOTE_SERVER_KEYS.contains(&k.as_str()) {
+            log::warn!("ohos: config_set ignores non-whitelisted key {}", k);
+            continue;
+        }
+        let val = match v {
+            serde_json::Value::String(s) => s.trim().to_owned(),
+            // null 与空串同义：都是「清掉这一项」。
+            serde_json::Value::Null => String::new(),
+            other => other.to_string(),
+        };
+        // 直接写 Config，而不走 `ui_interface::set_option`：后者在 ohos 分支
+        // 的最后一步正是 `Config::set_option`，之前那次 `CheckTestNatType`
+        // 是给被控端测 NAT 用的，主控改地址时没必要顺带发一次网络探测。
+        config::Config::set_option(k.clone(), val.clone());
+        if config::Config::get_option(k) == val {
+            applied += 1;
+        } else {
+            // 被 OVERWRITE_SETTINGS（安装包内嵌的定制项）锁住了，改不动。
+            log::warn!(
+                "ohos: config '{}' not saved (overridden by installed config)",
+                k
+            );
+        }
+    }
+    log::info!("ohos: config updated, {}/{} key(s) applied", applied, obj.len());
+    0
+}
+
+// ---------------------------------------------------------------------------
 // 主控会话
 // ---------------------------------------------------------------------------
 

@@ -24,6 +24,13 @@ export interface RustDeskNative {
   // 状态快照（JSON 字符串）。页面重建后用它恢复 UI。
   stateJson(): string | null;
 
+  // 服务器配置（JSON 字符串，键为 custom-rendezvous-server / relay-server /
+  // api-server / key / effective-rendezvous-server）。没初始化时返回 null。
+  configJson(): string | null;
+
+  // 写服务器配置。json 是上面那些键的对象；空串表示删除该项。
+  configSet(json: string): number;
+
   // 鼠标：mask 见 ohos/include/rustdesk_ohos.h，坐标是远端画面坐标系。
   mouse(mask: number, x: number, y: number, alt: number, ctrl: number,
         shift: number, command: number): number;

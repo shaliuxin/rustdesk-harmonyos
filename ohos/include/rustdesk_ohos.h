@@ -47,6 +47,19 @@ char *rustdesk_ohos_last_error(void);
 
 void rustdesk_ohos_string_free(char *p);
 
+// --- 连接配置（自建服务器）-------------------------------------------------
+
+// 读取服务器相关配置（JSON）。调用方负责 rustdesk_ohos_string_free。形如：
+// {"custom-rendezvous-server":"","relay-server":"","api-server":"","key":"",
+//  "effective-rendezvous-server":"rs-ny.rustdesk.com:21116"}
+// effective-* 是**实际生效**的地址（可能来自编译期内置的定制服务器）。
+char *rustdesk_ohos_config_json(void);
+
+// 写入服务器配置。json 是对象，只认 custom-rendezvous-server / relay-server /
+// api-server / key 四个键，其余忽略；值为空串表示删除该项（回到默认）。
+// 返回 0 成功。
+int32_t rustdesk_ohos_config_set(const char *json);
+
 // --- 主控会话 -------------------------------------------------------------
 
 // 连接远端。立即返回，结果通过 ui_event("connected"/"msgbox") 上报。

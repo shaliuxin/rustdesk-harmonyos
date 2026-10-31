@@ -14,6 +14,28 @@ struct Index {
   @State password: string = '';
   @State showPassword: boolean = false;
   @State connecting: boolean = false;
+  // 实际生效的 ID 服务器。放在首页是因为「连不上」最常见的原因就是
+  // 地址还指着默认公共服务器，让它在连接按钮旁边一直可见，比藏在设置里好。
+  @State serverLabel: string = '';
+
+  aboutToAppear(): void {
+    this.refreshServer();
+  }
+
+  // 从设置页返回时也要刷新（页面不会重建，只有 onPageShow 会触发）。
+  onPageShow(): void {
+    this.refreshServer();
+  }
+
+  private refreshServer(): void {
+    this.serverLabel = RustDesk.getConfig().effectiveServer;
+  }
+
+  private openSettings(): void {
+    router.pushUrl({ url: 'pages/Settings' }).catch((e: Error) => {
+      promptAction.showToast({ message: `打开设置失败：${e.message}` });
+    });
+  }
 
   private onConnect(): void {
     const id: string = this.peerId.trim();
@@ -53,14 +75,32 @@ struct Index {
           .fontSize(28)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
+        Blank()
+        // 设置入口。用文字而不是图标：media 目录里没有 gear 图标，
+        // 引一个不存在的资源会在打包时才报错。
+        Text('设置')
+          .fontSize(16)
+          .fontColor('#2F81F7')
+          .padding({ left: 12, top: 8, bottom: 8 })
+          .onClick(() => { this.openSettings(); })
       }
       .width('100%')
       .margin({ top: 72, bottom: 8 })
+      .alignItems(VerticalAlign.Center)
 
       Text('远程桌面 · 鸿蒙版')
         .fontSize(14)
         .fontColor('#8A94A6')
-        .margin({ bottom: 48 })
+
+      Text(`服务器：${this.serverLabel.length > 0 ? this.serverLabel : '未初始化'}`)
+        .fontSize(12)
+        .fontColor('#5A6478')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .margin({ top: 8, bottom: 40 })
+        .onClick(() => { this.openSettings(); })
 
       TextInput({ placeholder: '远端 ID，例如 123456789', text: this.peerId })
         .type(InputType.Number)

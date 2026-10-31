@@ -229,6 +229,40 @@ export class RustDesk {
     return native.switchDisplay(index);
   }
 
+  // --- 服务器配置 ---------------------------------------------------------
+
+  static getConfig(): ServerConfig {
+    const cfg: ServerConfig = new ServerConfig();
+    const json: string | null = native.configJson();
+    if (json === null || json.length === 0) {
+      return cfg;
+    }
+    try {
+      // Rust 侧保证这五个键一定存在，所以不需要逐字段判空。
+      const w: Record<string, string> = JSON.parse(json) as Record<string, string>;
+      cfg.idServer = w['custom-rendezvous-server'] ?? '';
+      cfg.relayServer = w['relay-server'] ?? '';
+      cfg.apiServer = w['api-server'] ?? '';
+      cfg.key = w['key'] ?? '';
+      cfg.effectiveServer = w['effective-rendezvous-server'] ?? '';
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'bad config json: %{public}s', json);
+    }
+    return cfg;
+  }
+
+  // 返回 0 成功。写盘由 Rust 侧的 Config 负责（config 文件在同一目录下）。
+  // 注意：改完服务器地址不需要重启应用 —— 连接时会重新读 Config。
+  static saveConfig(cfg: ServerConfig): number {
+    const w: Record<string, string> = {
+      'custom-rendezvous-server': cfg.idServer.trim(),
+      'relay-server': cfg.relayServer.trim(),
+      'api-server': cfg.apiServer.trim(),
+      'key': cfg.key.trim(),
+    };
+    return native.configSet(JSON.stringify(w));
+  }
+
   static ctrlAltDel(): number {
     return native.ctrlAltDel();
   }
@@ -272,6 +306,26 @@ export class RustDesk {
   static logProbe(msg: string): void {
     native.logProbe(msg);
   }
+}
+
+// --- 服务器配置 ------------------------------------------------------------
+//
+// 键名与 Rust 侧 REMOTE_SERVER_KEYS 一致（也和上游桌面端设置页的字符串一致）。
+// 这里把带横线的 CLI 风格键名挡在 RustDesk 内部，UI 只面对驼峰字段 ——
+// 页面里出现 cfg['custom-rendezvous-server'] 这种东西没有必要。
+//
+// 「留空」一律表示用默认值：
+//   relayServer 空 → 用 ID 服务器下发的地址
+//   apiServer   空 → http://<ID服务器>:21114
+export class ServerConfig {
+  // ID / Rendezvous 服务器，形如 192.168.1.10 或 rd.example.com:21116
+  idServer: string = '';
+  relayServer: string = '';
+  apiServer: string = '';
+  // 自建服务器公钥（id_ed25519.pub 的全部内容，单行）
+  key: string = '';
+  // 实际生效的地址，只读，由 Rust 侧算出来（可能来自编译期内置的定制服务器）
+  effectiveServer: string = '';
 }
 
 export class Modifiers {

@@ -215,6 +215,22 @@ napi_value JsStateJson(napi_env env, napi_callback_info /*info*/) {
     return TakeString(env, rustdesk_ohos_state_json());
 }
 
+// --- 服务器配置 ------------------------------------------------------------
+
+napi_value JsConfigJson(napi_env env, napi_callback_info /*info*/) {
+    return TakeString(env, rustdesk_ohos_config_json());
+}
+
+napi_value JsConfigSet(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (argc < 1) return MakeInt(env, -1);
+    std::string json;
+    if (!GetStringArg(env, args[0], json)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_config_set(json.c_str()));
+}
+
 napi_value JsMouse(napi_env env, napi_callback_info info) {
     // 7 个参数：mask, x, y, alt, ctrl, shift, command
     size_t argc = 7;
@@ -357,6 +373,8 @@ napi_value Init(napi_env env, napi_value exports) {
         {"sessionClose", nullptr, JsSessionClose, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sessionRefresh", nullptr, JsSessionRefresh, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stateJson", nullptr, JsStateJson, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"configJson", nullptr, JsConfigJson, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"configSet", nullptr, JsConfigSet, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"mouse", nullptr, JsMouse, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"key", nullptr, JsKey, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"ctrlAltDel", nullptr, JsCtrlAltDel, nullptr, nullptr, nullptr, napi_default, nullptr},
