@@ -371,6 +371,35 @@ impl TerminalUserToken {
 enum TerminalUserToken {
     SelfUser,
 }
+#[cfg(target_env = "ohos")]
+static HOST_CHAT_TX: std::sync::Mutex<Option<Sender>> = std::sync::Mutex::new(None);
+
+/// 记下当前被控连接的发送端，供 ArkTS 主动发聊天。
+///
+/// 只存 `tx`（一个 unbounded mpsc sender 的 clone），不持有整条连接，
+/// 所以对端断开后只是 send 失败，不会把 Connection 拖住不放。
+#[cfg(target_env = "ohos")]
+pub fn ohos_register_host_chat(inner: &ConnInner) {
+    if let Ok(mut g) = HOST_CHAT_TX.lock() {
+        *g = inner.tx.clone();
+    }
+}
+
+/// 被控端主动发一条聊天给主控。没有活跃连接时返回 false。
+#[cfg(target_env = "ohos")]
+pub fn ohos_send_host_chat(text: &str) -> bool {
+    let tx = HOST_CHAT_TX.lock().ok().and_then(|g| g.clone());
+    let Some(tx) = tx else { return false };
+    let mut misc = Misc::new();
+    misc.set_chat_message(ChatMessage {
+        text: text.to_owned(),
+        ..Default::default()
+    });
+    let mut msg = Message::new();
+    msg.set_misc(misc);
+    tx.send((Instant::now(), Arc::new(msg))).is_ok()
+}
+
 pub struct Connection {
     inner: ConnInner,
     display_idx: usize,
@@ -2418,6 +2447,16 @@ impl Connection {
 
     #[inline]
     fn send_to_cm(&mut self, data: ipc::Data) {
+        // 鸿蒙没有独立的连接管理器进程：上游把聊天、文件进度这些事情交给 CM
+        // 去画界面，鸿蒙上没人接，消息就蒸发了。这里把聊天直接转成 UI 事件，
+        // 并记下这条连接的发送端，让 ArkTS 能回话。
+        #[cfg(target_env = "ohos")]
+        {
+            if let ipc::Data::ChatMessage { text } = &data {
+                ohos_register_host_chat(&self.inner);
+                crate::platform::ohos::ui_handler::emit("host_chat", json!({ "text": text }));
+            }
+        }
         self.tx_to_cm.send(data).ok();
     }
 
@@ -3294,6 +3333,18 @@ impl Connection {
                     if self.peer_keyboard_enabled() {
                         MOUSE_MOVE_TIME.store(get_time(), Ordering::SeqCst);
                         self.input_pointer(pde, self.inner.id());
+                    }
+                    self.update_auto_disconnect_timer();
+                }
+                // 鸿蒙没有窗口系统，也没有「桌面」注入层，只能直接调
+                // OH_Input_InjectKeyEvent。键位翻译见 platform/ohos/keymap.rs。
+                #[cfg(all(target_os = "linux", target_env = "ohos"))]
+                Some(message::Union::KeyEvent(me)) => {
+                    if self.is_authed_view_camera_conn() {
+                        return true;
+                    }
+                    if self.peer_keyboard_enabled() {
+                        crate::platform::ohos::keymap::handle_key_event(&me);
                     }
                     self.update_auto_disconnect_timer();
                 }

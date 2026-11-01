@@ -22,6 +22,7 @@ pub mod ffi;
 //   ui_handler InvokeUiSession 的鸿蒙实现：帧槽 + JSON 事件
 pub mod entry;
 pub mod files;
+pub mod keymap;
 pub mod session;
 pub mod ui_handler;
 
