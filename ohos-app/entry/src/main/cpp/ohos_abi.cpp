@@ -320,12 +320,20 @@ void ohos_input_cancel_injection(void) {
     OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG, "injection cancelled");
 }
 
+// 当前按住的鼠标键（-1 表示没有）。拖动要靠移动事件带上按键：
+// 只发 BUTTON_DOWN 再发不带 button 的 MOVE，系统会当成「悬停」而不是拖拽。
+std::atomic<int32_t> g_pressed_button{-1};
+
 int32_t ohos_input_inject_mouse_move(int32_t x, int32_t y) {
     struct Input_MouseEvent* ev = OH_Input_CreateMouseEvent();
     if (ev == nullptr) {
         return -1;
     }
     OH_Input_SetMouseEventAction(ev, MOUSE_ACTION_MOVE);
+    int32_t pressed = g_pressed_button.load(std::memory_order_relaxed);
+    if (pressed >= 0) {
+        OH_Input_SetMouseEventButton(ev, pressed);
+    }
     OH_Input_SetMouseEventDisplayX(ev, x);
     OH_Input_SetMouseEventDisplayY(ev, y);
     // Global 注入按全局坐标系校验（IsValidGlobalXY）：不设 globalX/Y 会被当作
@@ -353,6 +361,7 @@ int32_t ohos_input_inject_mouse_button(int32_t button, int32_t down, int32_t x, 
     OH_Input_SetMouseEventActionTime(ev, NowMicros());
     int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
     OH_Input_DestroyMouseEvent(&ev);
+    g_pressed_button.store(down != 0 ? button : -1, std::memory_order_relaxed);
     LogInjectResult(down != 0 ? "button-down" : "button-up", rc, x, y);
     return rc;
 }
@@ -387,7 +396,8 @@ int32_t ohos_input_inject_mouse_wheel(int32_t x, int32_t y, float vertical) {
     if (vertical == 0.0f) {
         return 0;
     }
-    int32_t rc = InjectAxisStep(MOUSE_ACTION_AXIS_BEGIN, x, y, 0.0f, "wheel-begin");
+    // BEGIN 也带上轴值：部分实现只读第一个事件的轴值，BEGIN 给 0 会被忽略。
+    int32_t rc = InjectAxisStep(MOUSE_ACTION_AXIS_BEGIN, x, y, vertical, "wheel-begin");
     if (rc != 0) {
         return rc;
     }

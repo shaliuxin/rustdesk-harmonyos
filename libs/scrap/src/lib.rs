@@ -273,12 +273,13 @@ pub mod android {
                     }
                     3 | 4 => {
                         // 滚轮：协议把增量放在 y 上。不同客户端单位不一致 ——
-                        // Windows/Flutter 一档给 ±120，部分客户端直接给 ±1，
-                        // 统一折算成「档数」再交给 OH_Input（轴值是浮点增量）。
+                        // Windows/Flutter 一档给 ±120，部分客户端直接给 ±1。
+                        // OH_Input 的轴值是「像素增量」而不是档数，统一折算成
+                        // 每档 120 再下发（发 ±1 只会滚 1 像素，肉眼等于没动）。
                         let p = *LAST_POS.lock().unwrap_or_else(|e| e.into_inner());
                         let raw = y as f32;
-                        let notches = if raw.abs() >= 30.0 { raw / 120.0 } else { raw };
-                        ohos_input_inject_mouse_wheel(p.0, p.1, notches);
+                        let step = if raw.abs() >= 30.0 { raw } else { raw * 120.0 };
+                        ohos_input_inject_mouse_wheel(p.0, p.1, step);
                     }
                     _ => {}
                 }
