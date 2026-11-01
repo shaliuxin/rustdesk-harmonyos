@@ -255,6 +255,18 @@ int64_t NowMicros() {
     return static_cast<int64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
 }
 
+// 注入结果节流日志：rc 非 0 时必须立刻看见，0 也按 1/50 采样留痕，
+// 用来确认「远端事件确实走到了 OH_Input」这一环。
+void LogInjectResult(const char* what, int32_t rc, int32_t x, int32_t y) {
+    static std::atomic<int32_t> seq{0};
+    int32_t n = seq.fetch_add(1, std::memory_order_relaxed);
+    if (rc != 0 || n % 50 == 0) {
+        OH_LOG_Print(LOG_APP, rc != 0 ? LOG_ERROR : LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                     "inject %{public}s #%{public}d rc=%{public}d xy=%{public}d,%{public}d",
+                     what, n, rc, x, y);
+    }
+}
+
 }  // namespace
 
 /// 触发系统授权弹窗。返回 0 表示「已在授权流程中」或「已授权」。
@@ -316,9 +328,14 @@ int32_t ohos_input_inject_mouse_move(int32_t x, int32_t y) {
     OH_Input_SetMouseEventAction(ev, MOUSE_ACTION_MOVE);
     OH_Input_SetMouseEventDisplayX(ev, x);
     OH_Input_SetMouseEventDisplayY(ev, y);
+    // Global 注入按全局坐标系校验（IsValidGlobalXY）：不设 globalX/Y 会被当作
+    // 无效值直接返回 INPUT_PARAMETER_ERROR(401)。单屏设备全局坐标 == 显示坐标。
+    OH_Input_SetMouseEventGlobalX(ev, x);
+    OH_Input_SetMouseEventGlobalY(ev, y);
     OH_Input_SetMouseEventActionTime(ev, NowMicros());
     int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
     OH_Input_DestroyMouseEvent(&ev);
+    LogInjectResult("move", rc, x, y);
     return rc;
 }
 
@@ -331,25 +348,51 @@ int32_t ohos_input_inject_mouse_button(int32_t button, int32_t down, int32_t x, 
     OH_Input_SetMouseEventButton(ev, button);
     OH_Input_SetMouseEventDisplayX(ev, x);
     OH_Input_SetMouseEventDisplayY(ev, y);
+    OH_Input_SetMouseEventGlobalX(ev, x);
+    OH_Input_SetMouseEventGlobalY(ev, y);
     OH_Input_SetMouseEventActionTime(ev, NowMicros());
     int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
     OH_Input_DestroyMouseEvent(&ev);
+    LogInjectResult(down != 0 ? "button-down" : "button-up", rc, x, y);
     return rc;
 }
 
-int32_t ohos_input_inject_mouse_wheel(int32_t x, int32_t y, float vertical) {
+// 单发一个轴事件（action 由调用方给定）。
+static int32_t InjectAxisStep(int32_t action, int32_t x, int32_t y, float value, const char* what) {
     struct Input_MouseEvent* ev = OH_Input_CreateMouseEvent();
     if (ev == nullptr) {
         return -1;
     }
-    OH_Input_SetMouseEventAction(ev, MOUSE_ACTION_AXIS_BEGIN);
+    OH_Input_SetMouseEventAction(ev, action);
     OH_Input_SetMouseEventDisplayX(ev, x);
     OH_Input_SetMouseEventDisplayY(ev, y);
+    OH_Input_SetMouseEventGlobalX(ev, x);
+    OH_Input_SetMouseEventGlobalY(ev, y);
     OH_Input_SetMouseEventAxisType(ev, MOUSE_AXIS_SCROLL_VERTICAL);
-    OH_Input_SetMouseEventAxisValue(ev, vertical);
+    OH_Input_SetMouseEventAxisValue(ev, value);
     OH_Input_SetMouseEventActionTime(ev, NowMicros());
     int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
     OH_Input_DestroyMouseEvent(&ev);
+    LogInjectResult(what, rc, x, y);
+    if (action == MOUSE_ACTION_AXIS_UPDATE) {
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                     "wheel delta x1000=%{public}d", static_cast<int32_t>(value * 1000.0f));
+    }
+    return rc;
+}
+
+// 滚轮：系统按「手势生命周期」消费轴事件，只发 AXIS_BEGIN 不会真正滚动，
+// 必须 BEGIN → UPDATE(带轴值) → END 成一组；返回值取 UPDATE 那一步。
+int32_t ohos_input_inject_mouse_wheel(int32_t x, int32_t y, float vertical) {
+    if (vertical == 0.0f) {
+        return 0;
+    }
+    int32_t rc = InjectAxisStep(MOUSE_ACTION_AXIS_BEGIN, x, y, 0.0f, "wheel-begin");
+    if (rc != 0) {
+        return rc;
+    }
+    rc = InjectAxisStep(MOUSE_ACTION_AXIS_UPDATE, x, y, vertical, "wheel");
+    InjectAxisStep(MOUSE_ACTION_AXIS_END, x, y, 0.0f, "wheel-end");
     return rc;
 }
 
@@ -363,6 +406,7 @@ int32_t ohos_input_inject_key(int32_t keycode, int32_t down) {
     OH_Input_SetKeyEventActionTime(ev, NowMicros());
     int32_t rc = OH_Input_InjectKeyEvent(ev);
     OH_Input_DestroyKeyEvent(&ev);
+    LogInjectResult(down != 0 ? "key-down" : "key-up", rc, keycode, 0);
     return rc;
 }
 

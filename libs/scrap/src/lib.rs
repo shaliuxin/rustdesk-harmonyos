@@ -232,24 +232,53 @@ pub mod android {
             const TYPE_MASK: i32 = 0x7;
             let evt_type = mask & TYPE_MASK;
             let buttons = mask >> 3; // 1=左 2=右 4=中 8=后退 16=前进
+
+            // 上游协议里只有 move 事件带坐标，down/up 往往是 (0,0) —— Android 端
+            // 也是靠 InputService 自己记住 mouseX/mouseY 再补上的（见
+            // InputService.kt onMouseInput）。OHOS 的全局注入要求坐标有效，
+            // (0,0) 会被判成非法参数（rc=401），所以这里同样用最近一次 move 的
+            // 落点补齐按下/抬起事件。
+            static LAST_POS: Mutex<(i32, i32)> = Mutex::new((0, 0));
+            let (x, y) = match evt_type {
+                0 => {
+                    let mut p = LAST_POS.lock().unwrap_or_else(|e| e.into_inner());
+                    if x != 0 || y != 0 {
+                        *p = (x.max(0), y.max(0));
+                    }
+                    (x.max(0), y.max(0))
+                }
+                1 | 2 => {
+                    let p = *LAST_POS.lock().unwrap_or_else(|e| e.into_inner());
+                    (if x == 0 { p.0 } else { x }, if y == 0 { p.1 } else { y })
+                }
+                _ => (x, y),
+            };
+
             unsafe {
                 match evt_type {
                     0 => {
                         ohos_input_inject_mouse_move(x, y);
                     }
                     1 | 2 => {
-                        // OHOS：0=左 1=中 2=右
+                        // OHOS：0=左 1=中 2=右 3=前进 4=后退
                         let button = match buttons {
                             1 => 0,
                             2 => 2,
                             4 => 1,
+                            8 => 4,
+                            16 => 3,
                             _ => 0,
                         };
                         ohos_input_inject_mouse_button(button, (evt_type == 1) as i32, x, y);
                     }
                     3 | 4 => {
-                        // 滚轮：上游把增量放在 y 上，一档常见为 120。
-                        ohos_input_inject_mouse_wheel(x, y, y as f32 / 120.0);
+                        // 滚轮：协议把增量放在 y 上。不同客户端单位不一致 ——
+                        // Windows/Flutter 一档给 ±120，部分客户端直接给 ±1，
+                        // 统一折算成「档数」再交给 OH_Input（轴值是浮点增量）。
+                        let p = *LAST_POS.lock().unwrap_or_else(|e| e.into_inner());
+                        let raw = y as f32;
+                        let notches = if raw.abs() >= 30.0 { raw / 120.0 } else { raw };
+                        ohos_input_inject_mouse_wheel(p.0, p.1, notches);
                     }
                     _ => {}
                 }

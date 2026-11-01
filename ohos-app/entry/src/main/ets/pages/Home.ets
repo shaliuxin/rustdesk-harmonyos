@@ -66,6 +66,8 @@ struct Home {
   // 一次性密码被用掉后会在 Rust 侧自动更换，这里轮询把它同步到界面上，
   // 避免用户照着旧密码去念给对方听。
   private pwTimer: number = -1;
+  // 被控状态轮询：开关之后注入授权与主机状态都是异步变化的。
+  private hostTimer: number = -1;
 
   // 手机形态：被控能力平台不支持，「共享屏幕」这一档整体不渲染。
   // 在 aboutToAppear 里赋值（早于首次 build），不会出现先闪一下再消失。
@@ -91,7 +93,10 @@ struct Home {
     // 与设置页同一套：Rust 看门狗每 3 秒探测一次，这里 1 秒读一次结果。
     this.refreshServerStatus();
     this.statusTimer = setInterval(this.refreshServerStatus, 1000);
+    // 密码与注入授权都是「异步变化」的：一次性密码用过即换，注入授权走系统
+    // 弹窗回调，都在开关之后才落地，界面必须自己轮询，否则会一直停在旧文案。
     this.pwTimer = setInterval(this.refreshPassword, 2000);
+    this.hostTimer = setInterval(this.refreshHostState, 2000);
   }
 
   // 只在值真的变了才写状态：@State 每次赋值都会触发重渲染。
@@ -153,6 +158,10 @@ struct Home {
     if (this.pwTimer !== -1) {
       clearInterval(this.pwTimer);
       this.pwTimer = -1;
+    }
+    if (this.hostTimer !== -1) {
+      clearInterval(this.hostTimer);
+      this.hostTimer = -1;
     }
   }
 
