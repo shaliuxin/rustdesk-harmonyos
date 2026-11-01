@@ -3,6 +3,7 @@ import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { RustDesk, PeerInfo } from '../common/RustDesk';
+import { isPhoneForm } from '../common/DeviceForm';
 import { SettingsPage } from './Settings';
 
 // 主页：AppBar + 底部四个 tab（连接 / 聊天 / 共享屏幕 / 设置）。
@@ -63,7 +64,12 @@ struct Home {
   // 轮询定时器；-1 表示没在跑。
   private statusTimer: number = -1;
 
+  // 手机形态：被控能力平台不支持，「共享屏幕」这一档整体不渲染。
+  // 在 aboutToAppear 里赋值（早于首次 build），不会出现先闪一下再消失。
+  @State isPhone: boolean = false;
+
   aboutToAppear(): void {
+    this.isPhone = isPhoneForm();
     this.refresh();
     // 与设置页同一套：Rust 看门狗每 3 秒探测一次，这里 1 秒读一次结果。
     this.refreshServerStatus();
@@ -599,15 +605,20 @@ struct Home {
         }
         .tabBar(this.tabItem(1, '💬', '聊天'))
 
-        TabContent() {
-          this.serverTab();
+        // 手机形态没有「共享屏幕」：被控端在手机上无法实现（平台无输入注入
+        // 接口），留着只会是个永远「服务未运行」的死页面。
+        if (!this.isPhone) {
+          TabContent() {
+            this.serverTab();
+          }
+          .tabBar(this.tabItem(2, '▣', '共享屏幕'))
         }
-        .tabBar(this.tabItem(2, '▣', '共享屏幕'))
 
         TabContent() {
           SettingsPage();
         }
-        .tabBar(this.tabItem(3, '⚙', '设置'))
+        // 手机上「设置」是第 3 档（索引 2），桌面/2in1 上是第 4 档（索引 3）。
+        .tabBar(this.tabItem(this.isPhone ? 2 : 3, '⚙', '设置'))
       }
       .layoutWeight(1)
       .barBackgroundColor(C_BG)
@@ -615,7 +626,8 @@ struct Home {
       .onChange((index: number) => {
         this.currentTab = index;
         // 切回连接/共享时列表和 ID 可能已经变了。
-        if (index === 0 || index === 2) {
+        // 手机上索引 2 是「设置」，不需要刷新主控数据。
+        if (index === 0 || (!this.isPhone && index === 2)) {
           this.refresh();
         }
       })

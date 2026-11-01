@@ -1,5 +1,6 @@
 import { promptAction, router } from '@kit.ArkUI';
 import { RustDesk, ServerConfig } from '../common/RustDesk';
+import { isPhoneForm } from '../common/DeviceForm';
 
 // 设置页。
 //
@@ -166,8 +167,12 @@ export struct SettingsPage {
   @State saving: boolean = false;
   // ID 服务器连接状态的轮询定时器；-1 表示没在跑。
   private statusTimer: number = -1;
+  // 手机形态：隐藏「共享屏幕」（被控端）相关设置
+  @State isPhone: boolean = false;
 
   aboutToAppear(): void {
+    // 手机上没有「共享屏幕」页，被控端的策略项跟着一起隐藏。
+    this.isPhone = isPhoneForm();
     this.load();
     // 后台看门狗每 3 秒探测一次，这里 1 秒读一次结果即可 —— 与上游
     // `server_model.dart` 里 1 秒的 timerCallback 节奏一致。
@@ -532,22 +537,12 @@ export struct SettingsPage {
           this.textField('API 服务器', '地址簿 / 在线状态', '留空则用 http://<ID服务器>:21114',
             this.apiServer, (v: string) => { this.apiServer = v; }, false)
 
-          Column() {
-            this.fieldLabel('服务器公钥 Key', 'id_ed25519.pub 的内容')
-            TextArea({ placeholder: 'hbbs 主机上 cat id_ed25519.pub 得到的一行字符串', text: this.serverKey })
-              .height(96)
-              .fontSize(14)
-              .backgroundColor(C_FIELD)
-              .fontColor('#FFFFFF')
-              .placeholderColor(C_HINT)
-              .borderRadius(12)
-              .onChange((v: string) => { this.serverKey = v; })
-          }
-          .width('100%')
-          .padding(12)
-          .backgroundColor(C_CARD)
-          .borderRadius(12)
-          .margin({ bottom: 10 })
+          // 公钥本身就是 `cat id_ed25519.pub` 出来的一行字符串，原来用 96 高的
+          // 多行 TextArea 既空荡又和上下三项不齐；改成同样的单行 TextInput，
+          // 超长内容由输入框自身横向滚动。
+          this.textField('服务器公钥 Key', 'id_ed25519.pub 的内容',
+            'hbbs 主机上 cat id_ed25519.pub 的一行字符串',
+            this.serverKey, (v: string) => { this.serverKey = v; }, false)
 
           // 生效地址：Rust 侧算出来的真实目标，可能来自安装包内嵌配置
           // 而不是上面填的值 —— 连接报错时先看这一行。
@@ -679,50 +674,53 @@ export struct SettingsPage {
 
           // ==================== 6. Share screen ====================
           // 本端作为**被控端**时的策略，与主控设置分开放。
-          this.sectionTitle('共享屏幕')
+          // 手机形态没有被控能力，整组隐藏（否则是永远不生效的开关）。
+          if (!this.isPhone) {
+            this.sectionTitle('共享屏幕')
 
-          this.toggleRow('拒绝局域网发现', '打开后同一网段内的设备搜不到本机',
-            !this.enableLanDiscovery, (v: boolean) => { this.enableLanDiscovery = !v; })
+            this.toggleRow('拒绝局域网发现', '打开后同一网段内的设备搜不到本机',
+              !this.enableLanDiscovery, (v: boolean) => { this.enableLanDiscovery = !v; })
 
-          // 白名单：上游是弹一个可增删的列表对话框，这里折中为「点开就地编辑，
-          // 一行一条」。功能等价，且省掉一个弹窗层级。
-          SettingCard() {
-            this.linkRow('使用 IP 白名单', this.whitelistLabel(), () => {
-              this.showWhitelistEditor = !this.showWhitelistEditor;
-            })
-            if (this.showWhitelistEditor) {
-              TextArea({ placeholder: '192.168.1.20\n192.168.1.21', text: this.whitelist })
+            // 白名单：上游是弹一个可增删的列表对话框，这里折中为「点开就地编辑，
+            // 一行一条」。功能等价，且省掉一个弹窗层级。
+            SettingCard() {
+              this.linkRow('使用 IP 白名单', this.whitelistLabel(), () => {
+                this.showWhitelistEditor = !this.showWhitelistEditor;
+              })
+              if (this.showWhitelistEditor) {
+                TextArea({ placeholder: '192.168.1.20\n192.168.1.21', text: this.whitelist })
+                  .height(120)
+                  .fontSize(14)
+                  .backgroundColor(C_FIELD)
+                  .fontColor('#FFFFFF')
+                  .placeholderColor(C_HINT)
+                  .borderRadius(12)
+                  .margin({ bottom: 12 })
+                  .onChange((v: string) => { this.whitelist = v; })
+              }
+              Divider().color(C_DIVIDER)
+              this.linkRow('使用 ID 白名单', this.idWhitelistLabel(), () => {
+                this.showIdWhitelistEditor = !this.showIdWhitelistEditor;
+              })
+              if (this.showIdWhitelistEditor) {
+                TextArea({ placeholder: '123456789', text: this.idWhitelist })
                 .height(120)
                 .fontSize(14)
                 .backgroundColor(C_FIELD)
                 .fontColor('#FFFFFF')
                 .placeholderColor(C_HINT)
                 .borderRadius(12)
-                .margin({ bottom: 12 })
-                .onChange((v: string) => { this.whitelist = v; })
+                .margin({ top: 12 })
+                .onChange((v: string) => { this.idWhitelist = v; })
+              }
             }
-            Divider().color(C_DIVIDER)
-            this.linkRow('使用 ID 白名单', this.idWhitelistLabel(), () => {
-              this.showIdWhitelistEditor = !this.showIdWhitelistEditor;
-            })
-            if (this.showIdWhitelistEditor) {
-              TextArea({ placeholder: '123456789', text: this.idWhitelist })
-              .height(120)
-              .fontSize(14)
-              .backgroundColor(C_FIELD)
-              .fontColor('#FFFFFF')
-              .placeholderColor(C_HINT)
-              .borderRadius(12)
-              .margin({ top: 12 })
-              .onChange((v: string) => { this.idWhitelist = v; })
-            }
+
+            this.toggleRow('自适应码率', '网络变差时自动降码率保流畅',
+              this.enableAbr, (v: boolean) => { this.enableAbr = v; })
+
+            this.toggleRow('启用会话录制', '对端能否录制本端屏幕',
+              this.enableRecordSession, (v: boolean) => { this.enableRecordSession = v; })
           }
-
-          this.toggleRow('自适应码率', '网络变差时自动降码率保流畅',
-            this.enableAbr, (v: boolean) => { this.enableAbr = v; })
-
-          this.toggleRow('启用会话录制', '对端能否录制本端屏幕',
-            this.enableRecordSession, (v: boolean) => { this.enableRecordSession = v; })
 
           // ==================== 7. Display Settings ====================
           // Android 是跳子页 _DisplayPage，里面是
