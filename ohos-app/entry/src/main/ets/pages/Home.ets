@@ -63,23 +63,96 @@ struct Home {
   @State serverStatus: number = RustDesk.SERVER_STATUS_CONNECTING;
   // 轮询定时器；-1 表示没在跑。
   private statusTimer: number = -1;
+  // 一次性密码被用掉后会在 Rust 侧自动更换，这里轮询把它同步到界面上，
+  // 避免用户照着旧密码去念给对方听。
+  private pwTimer: number = -1;
 
   // 手机形态：被控能力平台不支持，「共享屏幕」这一档整体不渲染。
   // 在 aboutToAppear 里赋值（早于首次 build），不会出现先闪一下再消失。
   @State isPhone: boolean = false;
 
+  // --- 远程协助（被控端，仅 2in1）---
+  // 不做常驻服务：用户在这里手动开启，关掉即全部拆除。
+  @State hostSupported: boolean = false;
+  @State hostRunning: boolean = false;
+  // 0 未授权 / 1 授权中 / 2 已授权（注入键鼠的前置条件）
+  @State injectStatus: number = 0;
+  // 开关正在处理中，避免连点重复起停
+  @State hostBusy: boolean = false;
+
   aboutToAppear(): void {
     this.isPhone = isPhoneForm();
     this.refresh();
+
+    // 远程协助：只在支持的形态上初始化（2in1）
+    this.hostSupported = !this.isPhone && RustDesk.hostSupported();
+    this.refreshHostState();
+
     // 与设置页同一套：Rust 看门狗每 3 秒探测一次，这里 1 秒读一次结果。
     this.refreshServerStatus();
     this.statusTimer = setInterval(this.refreshServerStatus, 1000);
+    this.pwTimer = setInterval(this.refreshPassword, 2000);
+  }
+
+  // 只在值真的变了才写状态：@State 每次赋值都会触发重渲染。
+  private refreshPassword = (): void => {
+    const pw = RustDesk.getConfig().temporaryPassword;
+    if (pw !== this.myPassword) {
+      this.myPassword = pw;
+    }
+  }
+
+  // --- 远程协助 -------------------------------------------------------------
+
+  private refreshHostState = (): void => {
+    if (!this.hostSupported) {
+      return;
+    }
+    this.hostRunning = RustDesk.hostRunning();
+    this.injectStatus = RustDesk.injectionStatus();
+  }
+
+  private setHostPower(on: boolean): void {
+    if (this.hostBusy) {
+      return;
+    }
+    this.hostBusy = true;
+    try {
+      if (on) {
+        // 先要注入授权（系统弹窗，用户同意后回调才会变成已授权）；
+        // 采集授权在 hostStart 里由 AVScreenCapture 自己弹。
+        RustDesk.requestInjection();
+        const rc = RustDesk.hostStart();
+        if (rc !== 0) {
+          promptAction.showToast({ message: RustDesk.getLastError() || '启动失败' });
+        }
+      } else {
+        RustDesk.hostStop();
+      }
+    } finally {
+      this.hostBusy = false;
+      this.refreshHostState();
+    }
+  }
+
+  private hostStateText(): string {
+    if (!this.hostRunning) {
+      return '未开启';
+    }
+    if (this.injectStatus === 2) {
+      return '已开启，等待远程连接';
+    }
+    return '已开启（键鼠注入未授权，对方只能看）';
   }
 
   aboutToDisappear(): void {
     if (this.statusTimer !== -1) {
       clearInterval(this.statusTimer);
       this.statusTimer = -1;
+    }
+    if (this.pwTimer !== -1) {
+      clearInterval(this.pwTimer);
+      this.pwTimer = -1;
     }
   }
 
@@ -413,26 +486,49 @@ struct Home {
   serverTab() {
     Scroll() {
       Column() {
-        // 服务状态。鸿蒙版目前只做主控，被控端服务不可用 —— 如实说明，
-        // 而不是摆一个点了没反应的按钮。
+        // 远程协助（被控端）。不做常驻服务：开关打开才起采集 + 注册，
+        // 关掉即拆。系统会在开启时弹两次授权（屏幕采集、键鼠注入）。
         Column() {
           Row() {
             Text('●')
               .fontSize(12)
-              .fontColor(C_DANGER)
+              .fontColor(this.hostRunning
+                ? (this.injectStatus === 2 ? DOT_READY : DOT_CONNECTING)
+                : C_FAINT)
               .margin({ right: 8 })
-            Text('服务未运行')
-              .fontSize(16)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(C_TEXT)
+            Column() {
+              Text('远程协助（允许被控）')
+                .fontSize(16)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(C_TEXT)
+                .width('100%')
+              Text(this.hostStateText())
+                .fontSize(12)
+                .fontColor(C_DIM)
+                .width('100%')
+                .margin({ top: 2 })
+            }
+            .layoutWeight(1)
+
+            Toggle({ type: ToggleType.Switch, isOn: this.hostRunning })
+              .enabled(this.hostSupported && !this.hostBusy)
+              .selectedColor(C_ACCENT)
+              .onChange((isOn: boolean) => {
+                if (isOn !== this.hostRunning) {
+                  this.setHostPower(isOn);
+                }
+              })
           }
           .width('100%')
-          Text('鸿蒙版当前只实现了主控（去连别人），被控端服务尚未启用。\n下面的 ID 供其它设备连入时备用。')
+
+          Text(this.hostSupported
+            ? '开启后本机临时进入被控状态：向 ID 服务器注册，别人用你的 ID 就能连进来。\n只在前台开启、随时可关；关闭后立即断开会话并停止采集。'
+            : '当前设备形态不支持被控（仅 2in1 可用）。')
             .fontSize(13)
             .fontColor(C_DIM)
             .lineHeight(19)
             .width('100%')
-            .margin({ top: 8 })
+            .margin({ top: 10 })
         }
         .width('100%')
         .padding(14)
@@ -493,6 +589,13 @@ struct Home {
             }
             .width('100%')
             .margin({ top: 4 })
+            // 一次性密码的语义要说清楚：它只在一个会话里有效，被用掉就换新的
+            // （换了之后这里的数字会自动跟着变，见 refreshPassword）。
+            Text('一次有效，被连接使用后自动更换；需要断线后仍能用原密码重连，请设置固定密码。')
+              .fontSize(11)
+              .fontColor(C_FAINT)
+              .width('100%')
+              .margin({ top: 6 })
           }
           .width('100%')
 

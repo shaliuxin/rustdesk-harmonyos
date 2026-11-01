@@ -153,6 +153,7 @@ target_link_libraries(entry PUBLIC
     libohinput.so               # OH_Input_*(2in1 键鼠注入)
     libnative_avscreen_capture.so # OH_AVScreenCapture_*（被控端采集）
     libnative_media_core.so     # OH_AVBuffer_*（采集缓冲的读写）
+    libnative_buffer.so         # OH_NativeBuffer_*（拉取帧时的 Map/GetConfig/Unmap）
     libc++_shared.so
     libdl.so
     libm.so

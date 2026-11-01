@@ -224,6 +224,19 @@ int32_t rustdesk_ohos_displays_sync(void);
 // 连通性自检：打一条 hilog 并发一个 probe 事件。
 void rustdesk_ohos_log_probe(const char *msg);
 
+// --- 被控端：远程协助（按需起停，不做常驻服务）------------------------------
+//
+// 与 ArkTS 的分工：UI 只管调这四个函数，状态机（是否在跑、采集有没有起）
+// 全在 Rust 侧的 entry.rs。所有函数返回 0 成功 / 负数失败。
+int32_t rustdesk_ohos_host_supported(void);   // 1 = 本机型可被控（2in1）
+int32_t rustdesk_ohos_host_start(void);       // 起采集 + 注册 + 监听
+int32_t rustdesk_ohos_host_stop(void);        // 断会话 + 停采集 + 撤授权
+int32_t rustdesk_ohos_host_state(void);       // 0 停止 / 1 运行中
+
+// 键鼠注入授权：0 未授权 / 1 授权中 / 2 已授权
+int32_t rustdesk_ohos_injection_status(void);
+int32_t rustdesk_ohos_request_injection(void);
+
 // ===========================================================================
 // 二、C++ 必须实现的接口（Rust 依赖它们，缺失会导致链接失败）
 // ===========================================================================
@@ -240,10 +253,32 @@ int32_t ohos_input_can_inject(void);
 int32_t ohos_input_request_authorization(void);
 void ohos_input_block(int32_t block);
 
+// 注入授权状态：0=未授权 1=授权中（系统弹窗已出）2=已授权
+// API < 20 的系统没有 OH_Input_RequestInjection，会一直返回 0。
+int32_t ohos_input_query_authorized(void);
+// 主动放弃注入授权（结束远程协助时调）。
+void ohos_input_cancel_injection(void);
+
+// 坐标一律用**全局屏幕像素**（左上角为原点），与主控端看到的帧坐标一致。
+// button：0=左 1=中 2=右（与 OHOS MOUSE_BUTTON_* 同值）。
+int32_t ohos_input_inject_mouse_move(int32_t x, int32_t y);
+int32_t ohos_input_inject_mouse_button(int32_t button, int32_t down, int32_t x, int32_t y);
+int32_t ohos_input_inject_mouse_wheel(int32_t x, int32_t y, float vertical);
+// keycode 用 OHOS KeyCode（见 multimodalinput/oh_key_code.h）。
+int32_t ohos_input_inject_key(int32_t keycode, int32_t down);
+
 // --- 屏幕采集能力 ---------------------------------------------------------
 int32_t ohos_capture_can_start(void);
 int32_t ohos_capture_start(uint32_t display_id);
 int32_t ohos_capture_stop(void);
+// 采集是否仍在运行（1/0）。用于宿主守护线程在系统撤销授权后重起采集。
+int32_t ohos_capture_is_running(void);
+
+// 系统播放声（内部音频）。与画面同一次 AVScreenCapture 会话采集：
+// PCM S16LE / 48kHz / 立体声，只取「整个系统播放」这一路（不含麦克风）。
+// 数据先进 C++ 侧环形缓冲，Rust 的 audio_service 轮询取走后再做 Opus 编码。
+int32_t ohos_capture_audio_available(void);  // 可读字节数
+int32_t ohos_capture_read_audio(uint8_t *dst, int32_t cap);  // 返回实际字节数
 
 // 编码帧回调：C++ 编码后把 packet 交回 Rust host 侧。
 // data 只在回调期间有效，Rust 侧会立即拷贝。

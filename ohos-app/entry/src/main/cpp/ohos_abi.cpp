@@ -21,10 +21,12 @@
 #include <multimedia/player_framework/native_avbuffer.h>
 #include <multimedia/player_framework/native_avscreen_capture.h>
 #include <multimedia/player_framework/native_avscreen_capture_base.h>
+#include <native_buffer/native_buffer.h>
 #include <window_manager/oh_display_info.h>
 #include <window_manager/oh_display_manager.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -32,6 +34,7 @@
 #include <dlfcn.h>
 #include <mutex>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #undef LOG_DOMAIN
@@ -367,64 +370,285 @@ OH_AVScreenCapture* g_capture = nullptr;
 int32_t g_cap_w = 0;
 int32_t g_cap_h = 0;
 std::atomic<bool> g_cap_on{false};
+std::atomic<bool> g_audio_on{false};
+
+// ---------------------------------------------------------------------------
+// 系统声音（内部音频）环形缓冲
+// ---------------------------------------------------------------------------
+//
+// RustDesk 的 audio_service 在 Linux 上从 `_pa` IPC 取 PCM、在 Android 上从
+// AudioRecord 取；鸿蒙两者都没有。但已经在跑的 OH_AVScreenCapture 本身就能
+// 把「整个系统播放的声音」以 PCM 原始流交回来 —— 复用它，不引入第二套采集。
+//
+// 为什么要过一层环形缓冲而不是直接在系统回调里回调 Rust：
+//   • onAudioBufferAvailable 在系统线程上触发，回调期间不能阻塞，
+//     而 Rust 侧是拉模式（audio_service 自己每轮取一次），两边节奏不同步；
+//   • 缓冲也能吸收画面编码抖动带来的读延迟。
+//
+// 数据格式：PCM S16LE、48kHz、立体声（与 RustDesk 的 Opus 参数一致，
+// 转换只剩 s16→f32 一步，不需要重采样）。
+constexpr size_t kAudioRingCap = 1u << 20;  // 1 MiB ≈ 2.7s @48k stereo s16
+uint8_t g_audio_ring[kAudioRingCap];
+size_t g_audio_rd = 0;
+size_t g_audio_wr = 0;
+std::mutex g_audio_mu;
+std::atomic<int64_t> g_audio_last_read_ms{0};
+std::atomic<uint64_t> g_audio_dropped{0};
+
+int64_t now_ms() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
+
+void audio_ring_write(const uint8_t* src, size_t len) {
+    if (src == nullptr || len == 0 || len > kAudioRingCap) {
+        return;
+    }
+    std::lock_guard<std::mutex> lk(g_audio_mu);
+    // 消费者超过 1s 没来取（还没人订阅音频，或对端刚打开声音）：
+    // 丢掉缓冲里的陈数据，避免一开声音先放 2 秒"过去的声音"。
+    const int64_t last = g_audio_last_read_ms.load(std::memory_order_relaxed);
+    if (last == 0 || now_ms() - last > 1000) {
+        g_audio_rd = g_audio_wr;
+    }
+    const size_t avail = kAudioRingCap - (g_audio_wr - g_audio_rd);
+    if (len > avail) {
+        const size_t drop = len - avail;
+        g_audio_rd += drop;
+        g_audio_dropped.fetch_add(drop, std::memory_order_relaxed);
+    }
+    for (size_t i = 0; i < len; ++i) {
+        g_audio_ring[(g_audio_wr + i) % kAudioRingCap] = src[i];
+    }
+    g_audio_wr += len;
+}
 
 void OnCaptureError(OH_AVScreenCapture* /*capture*/, int32_t code, void* /*userData*/) {
     OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
                  "screen capture error %{public}d", code);
 }
 
-void OnCaptureBuffer(OH_AVScreenCapture* capture, OH_AVBuffer* buffer,
-                     OH_AVScreenCaptureBufferType type, int64_t /*timestamp*/, void* /*userData*/) {
+// SetCallback 结构体里的 onError 是不带 userData 的 2 参签名（与
+// SetErrorCallback 的 3 参不同），复用同一个日志实现。
+void OnCaptureErrorCb(OH_AVScreenCapture* capture, int32_t code) {
+    OnCaptureError(capture, code, nullptr);
+}
+
+// 拉取模式：onVideoBufferAvailable 只通知"有帧"，实际取帧走
+// AcquireVideoBuffer → OH_NativeBuffer。只有这条路能拿到系统缓冲区的
+// 真实行跨距（stride）与像素格式 —— DataCallback 推送模式的 OH_AVBuffer
+// 不暴露 stride，而真机的缓冲区是带行对齐 padding 的，按 width*4 紧凑
+// 解析会整幅错位（花屏）。取完帧按行压平成紧凑 RGBA 再推给 Rust。
+void OnVideoBufferAvailable(OH_AVScreenCapture* capture, bool isReady) {
     static std::atomic<int32_t> cb_count{0};
+    static std::atomic<int32_t> err_count{0};
     const int32_t n = cb_count.fetch_add(1);
-    if (n < 3 || n % 120 == 0) {
+    if (!isReady || capture == nullptr ||
+        !g_cap_on.load(std::memory_order_acquire)) {
+        return;
+    }
+    int32_t fence = -1;
+    int64_t timestamp = 0;
+    OH_Rect region{};
+    OH_NativeBuffer* nb =
+        OH_AVScreenCapture_AcquireVideoBuffer(capture, &fence, &timestamp, &region);
+    if (nb == nullptr) {
+        if (err_count.fetch_add(1) < 3) {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                         "acquire video buffer returned null");
+        }
+        return;
+    }
+    void* vir = nullptr;
+    OH_NativeBuffer_Config bcfg{};
+    const int32_t map_rc = OH_NativeBuffer_Map(nb, &vir);
+    OH_NativeBuffer_GetConfig(nb, &bcfg);
+    if (map_rc != 0 || vir == nullptr) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "native buffer map failed rc=%{public}d", map_rc);
+        OH_AVScreenCapture_ReleaseVideoBuffer(capture);
+        return;
+    }
+    // 注意：fence fd 不要自己 close。官方示例（Acquire→Map→GetConfig→UnMap→
+    // Release）从不关闭 fence —— 系统在 ReleaseVideoBuffer 时统一回收。
+    // 这里曾经 close(fence)，与系统的释放形成双重关闭：fd 号被复用后，
+    // 系统的第二次 close 会误杀随机存活 fd（连接 socket → 主控端反复断联；
+    // 音频线程 tokio 的 epoll fd → epoll_wait EBADF → panic 闪退）。
+    const int32_t w = bcfg.width;
+    const int32_t h = bcfg.height;
+    const int32_t stride = bcfg.stride;
+    if (w <= 0 || h <= 0 || stride < w * 4) {
+        if (err_count.fetch_add(1) < 3) {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                         "bad buffer config %dx%d stride=%d fmt=%d",
+                         w, h, stride, bcfg.format);
+        }
+        OH_NativeBuffer_Unmap(nb);
+        OH_AVScreenCapture_ReleaseVideoBuffer(capture);
+        return;
+    }
+    if (n < 3 || n % 150 == 0) {
         OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
-                     "capture callback #%{public}d type=%{public}d on=%{public}d",
-                     n, static_cast<int32_t>(type), g_cap_on.load());
+                     "capture frame #%{public}d %{public}dx%{public}d stride=%{public}d fmt=%{public}d",
+                     n, w, h, stride, bcfg.format);
     }
-    if (buffer == nullptr) {
-        return;
-    }
-    // 只要视频帧；音频由 RustDesk 自己的 audio_service 负责，这里不接。
-    if (type != OH_SCREEN_CAPTURE_BUFFERTYPE_VIDEO) {
-        return;
-    }
-    if (!g_cap_on.load(std::memory_order_acquire)) {
-        return;
-    }
-    uint8_t* addr = OH_AVBuffer_GetAddr(buffer);
-    int32_t capacity = OH_AVBuffer_GetCapacity(buffer);
-    if (addr == nullptr || capacity <= 0) {
-        return;
-    }
-    size_t offset = 0;
-    size_t size = static_cast<size_t>(capacity);
-    OH_AVCodecBufferAttr attr{};
-    if (OH_AVBuffer_GetBufferAttr(buffer, &attr) == AV_ERR_OK && attr.size > 0) {
-        offset = static_cast<size_t>(attr.offset);
-        size = static_cast<size_t>(attr.size);
-    }
-    if (offset + size > static_cast<size_t>(capacity)) {
-        // 元数据不可信时退回整块缓冲，避免越界。
-        offset = 0;
-        size = static_cast<size_t>(capacity);
-    }
-    const int32_t w = g_cap_w;
-    const int32_t h = g_cap_h;
-    if (w <= 0 || h <= 0) {
-        return;
-    }
-    const size_t stride = static_cast<size_t>(w) * 4;
-    const size_t need = stride * static_cast<size_t>(h);
-    if (size >= need) {
-        // 按配置的尺寸紧凑排布。若系统给了带 padding 的行宽，画面会歪，
-        // 届时需要从 attr 里取 stride（当前 API 未暴露，先按紧凑处理）。
-        rustdesk_ohos_capture_push_frame(addr + offset, need,
+
+    // 按行压平成紧凑 RGBA（stride 可能带 padding；BGRA 就地换 R/B 通道）。
+    const size_t compact_stride = static_cast<size_t>(w) * 4;
+    const size_t need = compact_stride * static_cast<size_t>(h);
+    static std::mutex compact_mu;
+    static std::vector<uint8_t> compact;
+    {
+        std::lock_guard<std::mutex> lk(compact_mu);
+        compact.resize(need);
+        const uint8_t* src = static_cast<const uint8_t*>(vir);
+        if (bcfg.format == NATIVEBUFFER_PIXEL_FMT_RGBA_8888 && stride == w * 4) {
+            std::memcpy(compact.data(), src, need);
+        } else {
+            for (int32_t y = 0; y < h; ++y) {
+                const uint8_t* row = src + static_cast<size_t>(y) * stride;
+                uint8_t* dst = compact.data() + static_cast<size_t>(y) * compact_stride;
+                if (bcfg.format == NATIVEBUFFER_PIXEL_FMT_RGBA_8888) {
+                    std::memcpy(dst, row, compact_stride);
+                } else if (bcfg.format == NATIVEBUFFER_PIXEL_FMT_BGRA_8888) {
+                    for (int32_t x = 0; x < w; ++x) {
+                        dst[x * 4 + 0] = row[x * 4 + 2];
+                        dst[x * 4 + 1] = row[x * 4 + 1];
+                        dst[x * 4 + 2] = row[x * 4 + 0];
+                        dst[x * 4 + 3] = row[x * 4 + 3];
+                    }
+                } else {
+                    if (err_count.fetch_add(1) < 3) {
+                        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                                     "unsupported pixel format %d", bcfg.format);
+                    }
+                    OH_NativeBuffer_Unmap(nb);
+                    OH_AVScreenCapture_ReleaseVideoBuffer(capture);
+                    return;
+                }
+            }
+        }
+        rustdesk_ohos_capture_push_frame(compact.data(), need,
                                          static_cast<size_t>(w),
-                                         static_cast<size_t>(h), stride);
+                                         static_cast<size_t>(h), compact_stride);
     }
-    // 回调返回前必须归还缓冲，否则系统不再投喂新帧。
+    OH_NativeBuffer_Unmap(nb);
     OH_AVScreenCapture_ReleaseVideoBuffer(capture);
+}
+
+// 音频缓冲可用：拉取 → 拷进环形缓冲 → 立即归还。
+// 只处理 OH_ALL_PLAYBACK（整个系统的播放声）。麦克风那一路在 Start 时就被
+// SetMicrophoneEnabled(false) 关掉了 —— 远程协助要先能把"电脑里的声音"传过去，
+// 录麦克风还牵扯隐私授权，等真有需求再单独开。
+void OnAudioBufferAvailable(OH_AVScreenCapture* capture, bool isReady,
+                            OH_AudioCaptureSourceType type) {
+    static std::atomic<int32_t> cnt{0};
+    static std::atomic<int32_t> err_cnt{0};
+    if (!isReady || capture == nullptr || type != OH_ALL_PLAYBACK ||
+        !g_cap_on.load(std::memory_order_acquire)) {
+        return;
+    }
+    // 关键：这个接口要的是「由调用方提供的结构体」，系统只负责往里填
+    // （`*audiobuffer` 不能是 nullptr，否则系统侧报 #906 并直接返回）。
+    // 传 `&nullptr` 会一直被拒 —— 这是第一次实现的错误。
+    static OH_AudioBuffer audio_buf{};
+    OH_AudioBuffer* p = &audio_buf;
+    const OH_AVSCREEN_CAPTURE_ErrCode rc =
+        OH_AVScreenCapture_AcquireAudioBuffer(capture, &p, type);
+    if (rc != AV_SCREEN_CAPTURE_ERR_OK || p == nullptr || p->buf == nullptr ||
+        p->size <= 0) {
+        if (err_cnt.fetch_add(1) < 3) {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                         "acquire audio buffer failed rc=%{public}d size=%{public}d",
+                         static_cast<int32_t>(rc), p == nullptr ? -1 : p->size);
+        }
+        return;
+    }
+    audio_ring_write(p->buf, static_cast<size_t>(p->size));
+    const int32_t n = cnt.fetch_add(1);
+    if (n < 3 || n % 500 == 0) {
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                     "capture audio #%{public}d size=%{public}d type=%{public}d",
+                     n, p->size, static_cast<int32_t>(type));
+    }
+    // 与视频缓冲一样：归还由系统负责，应用不要自己 close 任何 fd。
+    OH_AVScreenCapture_ReleaseAudioBuffer(capture, type);
+}
+
+/// 建一个采集实例并启动。`with_audio` 为 false 时完全不带音频配置。
+///
+/// 拆成单独函数是为了让调用方能在"带音频启动失败"时退回"纯画面" ——
+/// 音频是增强项，不能因为它拖垮整个被控链路。
+OH_AVScreenCapture* TryStartCapture(int32_t w, int32_t h, bool with_audio,
+                                    int32_t* out_rc) {
+    OH_AVScreenCapture* cap = OH_AVScreenCapture_Create();
+    if (cap == nullptr) {
+        *out_rc = -3;
+        return nullptr;
+    }
+
+    OH_AVScreenCaptureConfig cfg{};
+    cfg.captureMode = OH_CAPTURE_HOME_SCREEN;
+    cfg.dataType = OH_ORIGINAL_STREAM;  // 原始帧（RGBA / PCM），不是编码流
+    cfg.videoInfo.videoCapInfo.videoFrameWidth = w;
+    cfg.videoInfo.videoCapInfo.videoFrameHeight = h;
+    cfg.videoInfo.videoCapInfo.videoSource = OH_VIDEO_SOURCE_SURFACE_RGBA;
+    if (with_audio) {
+        cfg.audioInfo.micCapInfo.audioSampleRate = 48000;
+        cfg.audioInfo.micCapInfo.audioChannels = 2;
+        cfg.audioInfo.micCapInfo.audioSource = OH_MIC;
+        cfg.audioInfo.innerCapInfo.audioSampleRate = 48000;
+        cfg.audioInfo.innerCapInfo.audioChannels = 2;
+        cfg.audioInfo.innerCapInfo.audioSource = OH_ALL_PLAYBACK;
+    }
+
+    OH_AVSCREEN_CAPTURE_ErrCode rc = OH_AVScreenCapture_Init(cap, cfg);
+    if (rc != AV_SCREEN_CAPTURE_ERR_OK) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "capture init failed rc=%{public}d audio=%{public}d",
+                     static_cast<int32_t>(rc), with_audio ? 1 : 0);
+        OH_AVScreenCapture_Release(cap);
+        *out_rc = -4;
+        return nullptr;
+    }
+
+    if (with_audio) {
+        // 只要系统播放声，不要麦克风（关掉后系统也不会弹录音授权）。
+        rc = OH_AVScreenCapture_SetMicrophoneEnabled(cap, false);
+        if (rc != AV_SCREEN_CAPTURE_ERR_OK) {
+            OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG,
+                         "disable microphone rc=%{public}d", static_cast<int32_t>(rc));
+        }
+    }
+
+    OH_AVScreenCapture_SetErrorCallback(cap, OnCaptureError, nullptr);
+    // 拉取模式（SetCallback 的 onVideoBufferAvailable）而不是 SetDataCallback：
+    // 只有拉取模式的 AcquireVideoBuffer 能拿到 OH_NativeBuffer，从而读到
+    // 真实的 stride / 像素格式（真机缓冲区带行对齐 padding，见回调注释）。
+    OH_AVScreenCaptureCallback cbs{};
+    cbs.onError = OnCaptureErrorCb;
+    cbs.onAudioBufferAvailable = with_audio ? OnAudioBufferAvailable : nullptr;
+    cbs.onVideoBufferAvailable = OnVideoBufferAvailable;
+    rc = OH_AVScreenCapture_SetCallback(cap, cbs);
+    if (rc != AV_SCREEN_CAPTURE_ERR_OK) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "set callback failed rc=%{public}d", static_cast<int32_t>(rc));
+        OH_AVScreenCapture_Release(cap);
+        *out_rc = -4;
+        return nullptr;
+    }
+
+    rc = OH_AVScreenCapture_StartScreenCapture(cap);
+    if (rc != AV_SCREEN_CAPTURE_ERR_OK) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "start screen capture failed rc=%{public}d audio=%{public}d (user denied?)",
+                     static_cast<int32_t>(rc), with_audio ? 1 : 0);
+        OH_AVScreenCapture_Release(cap);
+        *out_rc = -5;
+        return nullptr;
+    }
+    g_audio_on.store(with_audio, std::memory_order_release);
+    return cap;
 }
 
 }  // namespace
@@ -458,48 +682,30 @@ int32_t ohos_capture_start(uint32_t display_id) {
     // 让 scrap 的显示器列表与真实屏幕一致，video_service 才能建服务。
     rustdesk_ohos_displays_sync();
 
-    OH_AVScreenCapture* cap = OH_AVScreenCapture_Create();
+    // 先试「画面 + 系统声音」，失败再退回「纯画面」。
+    OH_AVScreenCapture* cap = nullptr;
+    int32_t last_rc = 0;
+    for (int attempt = 0; attempt < 2 && cap == nullptr; ++attempt) {
+        const bool with_audio = attempt == 0;
+        cap = TryStartCapture(w, h, with_audio, &last_rc);
+        if (cap == nullptr && with_audio) {
+            OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG,
+                         "capture with audio failed rc=%{public}d, retry without audio",
+                         last_rc);
+        }
+    }
     if (cap == nullptr) {
-        return -3;
+        return last_rc;
     }
-
-    OH_AVScreenCaptureConfig cfg{};
-    cfg.captureMode = OH_CAPTURE_HOME_SCREEN;
-    cfg.dataType = OH_ORIGINAL_STREAM;  // 原始帧（RGBA），不是编码流
-    cfg.videoInfo.videoCapInfo.videoFrameWidth = w;
-    cfg.videoInfo.videoCapInfo.videoFrameHeight = h;
-    cfg.videoInfo.videoCapInfo.videoSource = OH_VIDEO_SOURCE_SURFACE_RGBA;
-
-    OH_AVSCREEN_CAPTURE_ErrCode rc = OH_AVScreenCapture_Init(cap, cfg);
-    if (rc != AV_SCREEN_CAPTURE_ERR_OK) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
-                     "capture init failed rc=%{public}d", static_cast<int32_t>(rc));
-        OH_AVScreenCapture_Release(cap);
-        return -4;
-    }
-
-    OH_AVScreenCapture_SetErrorCallback(cap, OnCaptureError, nullptr);
-    OH_AVScreenCapture_SetDataCallback(cap, OnCaptureBuffer, nullptr);
 
     g_cap_w = w;
     g_cap_h = h;
     g_cap_on.store(true, std::memory_order_release);
     g_capture_running = true;
-
-    rc = OH_AVScreenCapture_StartScreenCapture(cap);
-    if (rc != AV_SCREEN_CAPTURE_ERR_OK) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
-                     "start screen capture failed rc=%{public}d (user denied?)",
-                     static_cast<int32_t>(rc));
-        g_cap_on.store(false, std::memory_order_release);
-        g_capture_running = false;
-        OH_AVScreenCapture_Release(cap);
-        return -5;
-    }
-
     g_capture = cap;
     OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
-                 "screen capture started, %{public}dx%{public}d RGBA", w, h);
+                 "screen capture started, %{public}dx%{public}d RGBA, audio=%{public}d",
+                 w, h, g_audio_on.load() ? 1 : 0);
     return 0;
 }
 
@@ -516,9 +722,44 @@ int32_t ohos_capture_stop(void) {
         OH_AVScreenCapture_StopScreenCapture(cap);
         OH_AVScreenCapture_Release(cap);
         rustdesk_ohos_capture_clear();
+        g_audio_on.store(false, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lk(g_audio_mu);
+            g_audio_rd = 0;
+            g_audio_wr = 0;
+            g_audio_last_read_ms.store(0, std::memory_order_relaxed);
+        }
         OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG, "screen capture stopped");
     }
     return 0;
+}
+
+/// 采集是否在跑（1）或已停（0）。宿主守护线程用它判断要不要重起采集：
+/// 用户撤销录屏授权、系统回收、进程挂起后恢复，都会让采集静默消失。
+int32_t ohos_capture_is_running(void) {
+    return (g_capture_running && g_capture != nullptr) ? 1 : 0;
+}
+
+/// 可读的音频字节数（PCM S16LE 48k 立体声）。Rust 侧据此只取整 10ms 块。
+int32_t ohos_capture_audio_available(void) {
+    std::lock_guard<std::mutex> lk(g_audio_mu);
+    return static_cast<int32_t>(g_audio_wr - g_audio_rd);
+}
+
+/// 取走最多 cap 字节。返回实际拷贝量（0 表示暂时没有数据）。
+int32_t ohos_capture_read_audio(uint8_t* dst, int32_t cap) {
+    if (dst == nullptr || cap <= 0) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lk(g_audio_mu);
+    const size_t avail = g_audio_wr - g_audio_rd;
+    const size_t n = avail < static_cast<size_t>(cap) ? avail : static_cast<size_t>(cap);
+    for (size_t i = 0; i < n; ++i) {
+        dst[i] = g_audio_ring[(g_audio_rd + i) % kAudioRingCap];
+    }
+    g_audio_rd += n;
+    g_audio_last_read_ms.store(now_ms(), std::memory_order_relaxed);
+    return static_cast<int32_t>(n);
 }
 
 void ohos_capture_set_frame_callback(ohos_frame_cb cb) {

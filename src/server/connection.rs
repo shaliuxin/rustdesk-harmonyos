@@ -2649,6 +2649,11 @@ impl Connection {
                     Some(false),
                 );
                 self.check_update_temporary_password(true);
+                // 鸿蒙被控端：一次性密码用掉即作废，换一个新的再展示给用户。
+                // 已建立的会话不受影响（会话内不再校验口令）；需要「断线后还能
+                // 用老口令连回来」的场景请使用固定密码。
+                #[cfg(target_env = "ohos")]
+                crate::platform::ohos::entry::note_temporary_password_used();
                 return true;
             }
         }

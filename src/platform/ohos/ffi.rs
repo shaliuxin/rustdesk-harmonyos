@@ -50,6 +50,7 @@ mod raw {
         pub fn ohos_capture_can_start() -> c_int;
         pub fn ohos_capture_start(display_id: u32) -> c_int;
         pub fn ohos_capture_stop() -> c_int;
+        pub fn ohos_capture_is_running() -> c_int;
 
         // --- 编码帧回调：C++ 编码后把 H.264/H.265 packet 交给 Rust host 侧 ---
         // 回调签名：(codec, pts_us, is_key, data, len)，data 生命周期仅限回调内，Rust 侧需立即拷贝。
@@ -171,6 +172,12 @@ pub fn ohos_capture_start(display_id: u32) -> c_int {
 
 pub fn ohos_capture_stop() -> c_int {
     unsafe { raw::ohos_capture_stop() }
+}
+
+/// 采集是否仍在运行。系统可能在用户撤销录屏、或进程被挂起后单方面停掉采集，
+/// 守护线程靠它判断要不要重新起采集。
+pub fn ohos_capture_is_running() -> c_int {
+    unsafe { raw::ohos_capture_is_running() }
 }
 
 pub fn ohos_get_active_user_name() -> String {

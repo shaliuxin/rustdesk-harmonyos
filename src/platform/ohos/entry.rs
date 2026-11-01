@@ -169,6 +169,12 @@ pub extern "C" fn rustdesk_ohos_init(app_dir: *const c_char) -> c_int {
     // 必须赶在 UI 首次读配置之前，否则设置页会先闪一下上游默认值。
     seed_factory_defaults();
 
+    // 身份：ID 落盘由 `Config::get_id` 保证，这里提前取一次确保**首次就生成
+    // 并持久化**（ID 稳定，重连时对端不用改地址）。一次性密码则相反——只在
+    // 进程内存里，退出即换；同时清掉老版本留下的密码存档。
+    log::info!("ohos: device id = {}", config::Config::get_id());
+    remove_legacy_temp_password_file();
+
     // ID 服务器状态看门狗：进程内唯一一条后台线程，UI 只管读结果。
     // 尽早起，设置页首次出现时状态就已经有意义了。
     start_server_status_watchdog();
@@ -387,6 +393,39 @@ const FACTORY_LOCAL_DEFAULTS: [(&str, &str); 7] = [
 /// 名字里带版本号：以后想换一套出厂值，把 v1 改成 v2 即可让老用户也吃上新值。
 const FACTORY_MARKER: &str = "ohos_factory_defaults_v1";
 
+/// 一次性密码的**残留**存档文件名。
+///
+/// 早期实现曾把一次性密码落盘，以便应用重启后口令不变。这违背了「一次性」
+/// 的语义（等于把一次性口令变成长期口令），因此已废弃：现在密码只存在于
+/// 进程内存里（`password_security::TEMPORARY_PASSWORD`），进程退出即重新随机。
+///
+/// 常量保留只为一件事：启动时把老版本写下的残留文件删掉，别把它留在用户
+/// 设备上。确认没有老版本在线之后可以连同这段清理一起删。
+const TEMP_PASSWORD_FILE_LEGACY: &str = "ohos_temporary_password";
+
+fn remove_legacy_temp_password_file() {
+    let path = config::Config::path(TEMP_PASSWORD_FILE_LEGACY);
+    if path.exists() {
+        match std::fs::remove_file(&path) {
+            Ok(_) => log::info!("ohos: removed legacy temporary password file"),
+            Err(e) => log::warn!("ohos: remove legacy temp password file failed: {e}"),
+        }
+    }
+}
+
+/// 一次性密码被用掉之后的处理：**立刻换成新的**。
+///
+/// 语义就是字面意思的「一次性」——一个口令只在一个会话里有效，用掉即作废。
+/// 已经建立的会话不受影响（鉴权在连接时完成，会话内不再校验口令）；会话
+/// 短暂掉线时的重连由 RustDesk 自己的 session resume 覆盖，且用户若需要
+/// 「断线后仍能用老口令连回来」，应当改用固定密码（设置页可配）。
+///
+/// 由连接鉴权成功处调用（见 `server::connection::validate_password`）。
+pub fn note_temporary_password_used() {
+    crate::ui_interface::update_temporary_password();
+    log::info!("ohos: temporary password rotated after use");
+}
+
 /// 把出厂默认值写进配置。**只做一次**，见 [`FACTORY_MARKER`]。
 ///
 /// 逐个 `set_option` 而不是 `set_options`：后者是**整表替换**
@@ -529,6 +568,14 @@ fn start_server_status_watchdog() {
             // 而排错时真正关心的恰恰是「什么时候从绿变红」。
             if next != last {
                 log::info!("ohos: id server status -> {}", if ok { "ready" } else { "failed" });
+                // 网络从「不可达」恢复：如果远程协助开着，立刻让 rendezvous
+                // 重新注册，而不是等它自己的重试超时（最坏 18s）。
+                // 重启 mediator 不会关掉已有会话（只有 stop-service=Y 才 close_connections），
+                // 所以这一步对正在进行的连接是安全的。
+                if ok && last == SERVER_STATUS_FAILED && HOST_RUNNING.load(Ordering::SeqCst) {
+                    log::info!("ohos host: network recovered, re-registering now");
+                    crate::RendezvousMediator::restart();
+                }
                 last = next;
             }
             thread::sleep(PROBE_INTERVAL);
@@ -544,7 +591,10 @@ pub extern "C" fn rustdesk_ohos_server_status() -> c_int {
     SERVER_STATUS.load(Ordering::SeqCst)
 }
 
-/// 刷新一次性密码。首页卡片上的「刷新」按钮。
+/// 手动刷新一次性密码。首页卡片上的「刷新」按钮。
+///
+/// 除了用户主动点刷新，密码在**被用掉之后**也会自动更换，
+/// 见 [`note_temporary_password_used`]。
 #[no_mangle]
 pub extern "C" fn rustdesk_ohos_update_temporary_password() {
     crate::ui_interface::update_temporary_password();
@@ -1270,6 +1320,90 @@ pub extern "C" fn rustdesk_ohos_log_probe(msg: *const c_char) {
 
 static HOST_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// 服务线程是否活着。`start_server` 返回（panic、runtime 结束）时置 false，
+/// 由守护线程负责重新拉起 —— 这是「断线自动重连」的服务侧兜底。
+static SERVER_ALIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 守护线程只起一条。
+static HOST_SUPERVISOR_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 起服务线程（采集已经在跑，这里只负责注册 + 监听）。
+///
+/// 用 `swap(true)` 做互斥：守护线程和用户点开关可能同时想拉起服务，
+/// 谁先抢到谁执行，另一个直接返回，不会出现两个 `start_server` 抢监听端口。
+fn spawn_server_thread() {
+    if SERVER_ALIVE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let spawned = thread::Builder::new()
+        .name("ohos-host".into())
+        .spawn(|| {
+            // start_server 自带 #[tokio::main]，会在这个线程里建 runtime 并常驻。
+            crate::server::start_server(true);
+            SERVER_ALIVE.store(false, Ordering::SeqCst);
+            log::warn!("ohos host: server thread exited");
+        });
+    if spawned.is_err() {
+        SERVER_ALIVE.store(false, Ordering::SeqCst);
+        log::error!("ohos host: spawn server thread failed");
+    }
+}
+
+/// 宿主守护线程：断线/异常退出的自动恢复。
+///
+/// 覆盖三种「看起来是网络问题、其实是进程内掉了东西」的情况：
+///   1. 服务线程退出（panic / runtime 被回收）→ 重新 `start_server`，
+///      采集还在就不重起采集（避免重复弹系统授权）；
+///   2. 系统单方面停掉采集（用户撤销录屏、切后台被回收）→ 重起采集；
+///   3. 网络恢复 → 由状态看门狗触发 mediator 立即重新注册（见那边注释）。
+///
+/// 退避从 2s 起翻倍、封顶 30s，避免服务起不来时打爆日志和 CPU。
+fn start_host_supervisor() {
+    if HOST_SUPERVISOR_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let spawned = thread::Builder::new()
+        .name("ohos-host-supervisor".into())
+        .spawn(|| {
+            let mut backoff = 2u64;
+            loop {
+                thread::sleep(Duration::from_secs(2));
+                if !HOST_RUNNING.load(Ordering::SeqCst) {
+                    backoff = 2; // 用户主动关了，重新计数
+                    continue;
+                }
+                if SERVER_ALIVE.load(Ordering::SeqCst) {
+                    backoff = 2;
+                    continue;
+                }
+                log::warn!("ohos host: server is down, retry in {backoff}s");
+                thread::sleep(Duration::from_secs(backoff));
+                backoff = (backoff * 2).min(30);
+                if !HOST_RUNNING.load(Ordering::SeqCst)
+                    || SERVER_ALIVE.load(Ordering::SeqCst)
+                {
+                    continue;
+                }
+                if ffi::ohos_capture_is_running() != 1 {
+                    let rc = ffi::ohos_capture_start(0);
+                    log::warn!("ohos host: capture restart rc={rc}");
+                    if rc != 0 {
+                        // 采集起不来（多半是用户没重新授权）就别硬起服务，
+                        // 否则又是「能连上但没画面」的半残状态。
+                        continue;
+                    }
+                    crate::RendezvousMediator::restart();
+                }
+                spawn_server_thread();
+            }
+        });
+    if spawned.is_err() {
+        HOST_SUPERVISOR_STARTED.store(false, Ordering::SeqCst);
+        log::error!("ohos host: spawn supervisor failed");
+    }
+}
+
 /// 查询本机是否具备被控能力（2in1 形态 + 系统有采集接口）。
 #[no_mangle]
 pub extern "C" fn rustdesk_ohos_host_supported() -> c_int {
@@ -1322,22 +1456,17 @@ pub extern "C" fn rustdesk_ohos_host_start() -> c_int {
     // stop-service 可能是上次 stop 留下的，启动前显式清零。
     config::Config::set_option("stop-service".to_owned(), "N".to_owned());
 
-    thread::Builder::new()
-        .name("ohos-host".into())
-        .spawn(|| {
-            // start_server 自带 #[tokio::main]，会在这个线程里建 runtime 并常驻。
-            crate::server::start_server(true);
-        })
-        .map_err(|e| format!("host: 线程创建失败: {e}"))
-        .map(|_| {
-            log::info!("ohos host: started (capture + rendezvous)");
-            0
-        })
-        .unwrap_or_else(|e| {
-            ffi::ohos_capture_stop();
-            HOST_RUNNING.store(false, Ordering::SeqCst);
-            set_error(&e)
-        })
+    spawn_server_thread();
+    if !SERVER_ALIVE.load(Ordering::SeqCst) {
+        ffi::ohos_capture_stop();
+        HOST_RUNNING.store(false, Ordering::SeqCst);
+        return set_error("host: 服务线程启动失败");
+    }
+    // 守护线程全程只需一条，这里幂等启动：断线、采集被系统回收、服务线程退出
+    // 都由它兜底拉起（见 start_host_supervisor）。
+    start_host_supervisor();
+    log::info!("ohos host: started (capture + rendezvous)");
+    0
 }
 
 /// 停止远程协助：断开会话、停采集、撤销注入授权。

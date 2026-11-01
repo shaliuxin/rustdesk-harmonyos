@@ -417,6 +417,39 @@ export class RustDesk {
     return native.serverStatus();
   }
 
+  // --- 被控端：远程协助 -----------------------------------------------------
+  //
+  // 只做薄封装：状态机在 Rust 的 entry.rs（HOST_RUNNING + 采集开关），
+  // ArkTS 侧不缓存，避免两处状态不一致。
+
+  /** 本机是否支持被控（仅 2in1）。 */
+  static hostSupported(): boolean {
+    return native.hostSupported() === 1;
+  }
+
+  /** 开启远程协助。返回 0 成功，负数失败（细节见 lastErrorText）。 */
+  static hostStart(): number {
+    return native.hostStart();
+  }
+
+  static hostStop(): void {
+    native.hostStop();
+  }
+
+  static hostRunning(): boolean {
+    return native.hostState() === 1;
+  }
+
+  /** 注入授权：0 未授权 / 1 授权中 / 2 已授权。 */
+  static injectionStatus(): number {
+    return native.injectionStatus();
+  }
+
+  /** 触发系统的「允许远程控制」弹窗，异步给结果。 */
+  static requestInjection(): number {
+    return native.requestInjection();
+  }
+
   static ctrlAltDel(): number {
     return native.ctrlAltDel();
   }

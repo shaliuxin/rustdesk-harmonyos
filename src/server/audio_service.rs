@@ -101,21 +101,24 @@ mod pa_impl {
         // screen, so connecting there fails and logs an error every second.
         // Wait here instead; audio starts once a user logs in. Poll slowly,
         // `is_prelogin` spawns a process on every call.
-        #[cfg(target_os = "linux")]
+        //
+        // ohos：没有 `_pa` IPC（也没有 cm），走 AVScreenCapture 的内部音频，
+        // 下面所有 `_pa` 相关的分支都对它排除，见 `target_env != "ohos"`。
+        #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
         while crate::platform::is_prelogin() {
             if !sp.ok() {
                 return Ok(());
             }
             hbb_common::sleep(3.).await;
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
         let mut stream = crate::ipc::connect(1000, "_pa").await?;
         let mut encoder = AudioEncoder::new(Encoder::new(
             crate::platform::PA_SAMPLE_RATE,
             Stereo,
             LowDelay,
         )?);
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
         allow_err!(
             stream
                 .send(&crate::ipc::Data::Config((
@@ -124,17 +127,19 @@ mod pa_impl {
                 )))
                 .await
         );
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
         let zero_audio_frame: Vec<f32> = vec![0.; AUDIO_DATA_SIZE_U8 / 4];
         #[cfg(target_os = "android")]
         let mut android_data = vec![];
+        #[cfg(target_env = "ohos")]
+        let mut ohos_data = vec![];
         while sp.ok() && !RESTARTING.load(Ordering::SeqCst) {
             sp.snapshot(|sps| {
                 sps.send(create_format_msg(crate::platform::PA_SAMPLE_RATE, 2));
                 Ok(())
             })?;
 
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
             {
                 // The `_pa` peer closing surfaces as `Err` here. Dropping it left the loop polling
                 // a dead socket -- one 0-byte read per poll, ready at once and never `Pending` --
@@ -175,6 +180,24 @@ mod pa_impl {
                 send_f32(data, &mut encoder, &sp);
             } else {
                 hbb_common::sleep(0.1).await;
+            }
+
+            // ohos：从 AVScreenCapture 的音频环形缓冲取「系统播放声」。
+            // 数据是 S16LE/48k/立体声，`get_audio_raw` 已转成 f32 交错样本，
+            // 长度是 10ms 的整数倍（Opus 的固定帧长要求）。
+            #[cfg(target_env = "ohos")]
+            if scrap::android::ffi::get_audio_raw(&mut ohos_data, &mut vec![]).is_some() {
+                let aligned = align_to_32_if_needed(&ohos_data);
+                let bytes = aligned.as_deref().unwrap_or(&ohos_data[..]);
+                // SAFETY: `bytes` 是 4 字节对齐（上面已检查，或按 align 4 新分配），
+                // 且只按整 f32 读取。
+                let data = unsafe {
+                    std::slice::from_raw_parts::<f32>(bytes.as_ptr() as _, bytes.len() / 4)
+                };
+                send_f32(data, &mut encoder, &sp);
+            } else {
+                // 10ms 轮询：音频对延迟敏感，100ms 的粒度会让对端听感明显断续。
+                hbb_common::sleep(0.01).await;
             }
         }
         Ok(())
@@ -662,7 +685,10 @@ fn send_f32(data: &[f32], encoder: &mut AudioEncoder, sp: &GenericService) {
     if !encoder.should_encode(data) {
         return;
     }
-    #[cfg(target_os = "android")]
+    // ohos 与 android 走同一条：一次拿到的是 10ms 的整数倍，按 960（20ms 立体声）
+    // 切块编码。非移动端（`_pa`/cpal）拿到的是固定 3840 字节，走下面的
+    // "整块编码"分支。
+    #[cfg(any(target_os = "android", target_env = "ohos"))]
     {
         // the permitted opus data size are 120, 240, 480, 960, 1920, and 2880
         // if data size is bigger than BATCH_SIZE, AND is an integer multiple of BATCH_SIZE
@@ -693,7 +719,7 @@ fn send_f32(data: &[f32], encoder: &mut AudioEncoder, sp: &GenericService) {
         }
     }
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_env = "ohos")))]
     match encoder.encoder.encode_vec_float(data, data.len() * 6) {
         Ok(data) => {
             let mut msg_out = Message::new();
