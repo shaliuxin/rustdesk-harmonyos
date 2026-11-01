@@ -14,9 +14,9 @@ import { RustDesk } from './RustDesk';
  *                     常量（经 native.version() 读回），**不在这里手写** ——
  *                     上游一升级、重编，这里自动跟着变。
  *
- * 最终展示形态：`0.1.0 (1.5.1) for HarmonyOS`
+ * 最终展示形态：`0.1.1 (1.5.1) for HarmonyOS`
  */
-export const OHOS_APP_VERSION: string = '0.1.0';
+export const OHOS_APP_VERSION: string = '0.1.1';
 
 /** 产品后缀，接在版本串末尾。 */
 export const VERSION_SUFFIX: string = 'for HarmonyOS';
@@ -24,7 +24,7 @@ export const VERSION_SUFFIX: string = 'for HarmonyOS';
 /**
  * 应用内展示用的完整版本串。
  *
- * 核心版本读不到时（例如 native 尚未加载）退化成 `0.1.0 for HarmonyOS`，
+ * 核心版本读不到时（例如 native 尚未加载）退化成 `0.1.1 for HarmonyOS`，
  * 不会显示一对空括号。
  */
 export function appVersionLabel(): string {

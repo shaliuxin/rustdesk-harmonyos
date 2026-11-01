@@ -247,10 +247,27 @@ memcpy 因而是一次行对行大拷贝；ArkTS 把 XComponent 的宽高比设�
 | 用户名/锁屏状态 | 返回空串 / 未锁定 | account、screenLock 都是系统 API，普通应用拿不到 NDK 接口 |
 | 指针位置 | `ohos_cursor_pos` 返回 -1 | OHOS 无「读全局指针坐标」的 NDK；`OH_Input_GetMouseEvent` 是注入用的构造器，不是状态查询 |
 | 输入屏蔽 | 只记日志 | 无全局输入拦截 NDK，`block_input` 在 OHOS 上无法真正生效 |
-| 屏幕采集 | `ohos_capture_can_start()` 返回 0 | 要接 AVScreenCapture，M3/M4 |
-| 键鼠注入 | `ohos_input_can_inject()` 仅判形态 | 注入要 `ohos.permission.INJECT_INPUT_EVENT`（需 ACL），M3 |
+| 屏幕采集 | ✅ 已接 AVScreenCapture（M3） | 见 8.4；模拟器媒体服务不产生帧回调，需 2in1 真机验证 |
+| 键鼠注入 | ✅ 已接 OH_Input（M3，仅 2in1） | 见 8.4 |
+| 被控端音频 | ✅ 系统播放声（`OH_ALL_PLAYBACK`） | 麦克风未开（要录音隐私授权），见 8.4 |
 
 这些偏差都写进了对应函数的注释里，改的时候按注释里给的路径走。
+
+### 8.4 被控（M3，临时远程协助）实现要点
+
+不装常驻服务：用户在「共享屏幕」页打开开关 → 应用进程内起采集 + 注册 + 监听，
+关掉即全部拆掉。几条踩过的坑，改代码前先读：
+
+| 主题 | 结论 |
+|---|---|
+| 取帧方式 | 必须用 `SetCallback` + `AcquireVideoBuffer` 拉取模式。`SetDataCallback` 推送模式不暴露 stride，真机缓冲区按 64 字节行对齐，按 `width*4` 紧凑解析会整幅错位（花屏） |
+| fence fd | **不要自己 `close(fence)`**。系统在 `ReleaseVideoBuffer` 时统一回收，双重关闭会误杀复用后的 fd（表现为连接反复断、tokio epoll `EBADF` 闪退） |
+| 音频取数 | `AcquireAudioBuffer` 要求调用方**先提供 `OH_AudioBuffer` 结构体**再传其地址；传空指针会被 `#906` 拒绝（采集回调照常触发但一帧也拿不到） |
+| 音频格式 | S16LE / 48k / 立体声，与 Opus 参数一致；Rust 侧按整 10ms 块取（Opus 只接受固定帧长），`s16 → f32` 后编码 |
+| 音频降级 | 先试「画面+声音」，`Init`/`Start` 失败自动退回纯画面 —— 音频不能拖垮被控链路 |
+| 身份稳定 | **ID 持久化**（`Config::get_id`）：重连/重启后地址不变。**一次性密码不落盘**：只在进程内存里，退出即换；且被成功使用一次后立刻更换（`connection::validate_password` → `entry::note_temporary_password_used`）。需要「断线后仍可用原口令重连」的场景走固定密码。老版本残留的 `ohos_temporary_password` 文件会在启动时删除 |
+| 断线重连 | ① 状态看门狗发现「服务器不可达→可达」且远程协助开着 → 立刻 `RendezvousMediator::restart()` 重注册（不等 18s 超时），不关已有会话；② 宿主守护线程每 2s 巡检，`start_server` 线程退出或采集被系统回收时按 2s→30s 退避自动拉起 |
+
 
 
 ---
