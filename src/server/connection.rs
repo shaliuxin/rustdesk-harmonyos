@@ -717,6 +717,11 @@ impl Connection {
         }
         #[cfg(target_os = "android")]
         start_channel(rx_to_cm, tx_from_cm);
+        // 鸿蒙没有 CM 进程：自己起一个只处理文件传输的最小服务，否则
+        // `send_fs()` 发出去的 ReadDir / NewWrite 全部无人接收，主控的文件
+        // 窗口会一直空着。
+        #[cfg(target_env = "ohos")]
+        crate::platform::ohos::fs_service::start(rx_to_cm, tx_from_cm.clone(), id);
         #[cfg(target_os = "android")]
         conn.send_permission(Permission::Keyboard, conn.keyboard)
             .await;

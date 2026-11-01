@@ -984,7 +984,9 @@ pub async fn start_listen<T: InvokeUiCM>(
 }
 
 #[cfg(not(any(target_os = "ios")))]
-async fn handle_fs(
+// `pub(crate)`：鸿蒙没有 CM 进程，由 platform::ohos::fs_service 直接复用这套
+// 文件系统处理逻辑（见该模块注释）。
+pub(crate) async fn handle_fs(
     fs: ipc::FS,
     write_jobs: &mut Vec<fs::TransferJob>,
     read_jobs: &mut Vec<fs::TransferJob>,
@@ -1457,7 +1459,7 @@ async fn start_read_job(
 /// but communicates via IPC instead of direct network stream.
 /// When modifying job processing logic, ensure both implementations stay in sync.
 #[cfg(not(any(target_os = "ios")))]
-async fn handle_read_jobs_tick(
+pub(crate) async fn handle_read_jobs_tick(
     jobs: &mut Vec<fs::TransferJob>,
     tx: &UnboundedSender<Data>,
     conn_id: i32,

@@ -146,7 +146,11 @@ pub extern "C" fn rustdesk_ohos_init(app_dir: *const c_char) -> c_int {
         _ => return set_error("rustdesk_ohos_init: app_dir is null or empty"),
     };
 
-    *config::APP_DIR.write().unwrap() = dir;
+    *config::APP_DIR.write().unwrap() = dir.clone();
+    // 被控端文件传输要有默认起始目录（对端发 `ReadDir{dir:""}` 时落到 home）。
+    // 鸿蒙没有 POSIX home，上游 `Config::get_home()` 在移动端直接读这个全局，
+    // 不设置就是空串 —— 主控看到的目录会是空的。用沙箱 filesDir。
+    *config::APP_HOME_DIR.write().unwrap() = dir;
 
     // 定制客户端（换 logo / 换服务器）在编译期嵌进二进制，与桌面端一致。
     crate::load_custom_client();
