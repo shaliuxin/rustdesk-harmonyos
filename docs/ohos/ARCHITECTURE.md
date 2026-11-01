@@ -131,26 +131,45 @@ librustdesk_core.a（cargo build --target aarch64-unknown-linux-ohos）
 
 ---
 
-## 7. 上游同步工作流（每月 1 次，30 分钟）
+## 7. 上游同步工作流
+
+### 跟 tag，不跟 master
+
+**同步目标只有发行 tag（`1.5.1` / `1.6.0` …），永不合 master 头。** 理由：
+
+- master 上混着开发中的翻译、CI 调整、未合入的重构，跟它走等于把未发布的行为带进来；
+- 对外需要一个能说清的版本对应关系 —— 应用内版本串 `0.1.0 (1.5.1) for HarmonyOS`
+  里括号那个数字，就是选中的 tag（来自 `src/version.rs` 的 `VERSION`，合并后重编自动变）；
+- 发版 tag 是上游自己验证过的状态，出问题也容易对照上游的 release note 定位。
+
+一条命令走完（默认自动取最新发行 tag，也可显式指定）：
 
 ```bash
-git fetch origin
-git checkout ohos/main
-git merge --no-commit origin/master      # 理论上零冲突（Tier1/2 不在 git 里）
-python scripts/ohos/apply-mobile-cfg.py  # 重新施加生成式补丁
-bash scripts/ohos/build-core.sh          # 编译验证
-# 失败则按 §8 处理
-git commit -m "chore: merge upstream $(date +%F)"
+bash scripts/ohos/sync-upstream.sh            # 自动选最新 tag
+bash scripts/ohos/sync-upstream.sh 1.6.0      # 指定 tag
 ```
+
+脚本内部步骤：定位 tag → `merge --no-ff` → 重跑 `apply-mobile-cfg.py` →
+aarch64 编译验证 → 打印补丁面体检与"关键依赖是否变动" → 提交。
+若目标 tag 已在当前分支内，直接退出（幂等，可以随时跑）。
+
+合并完成后还有两件手工事：`app.json5` 的 `versionName`/`versionCode` 与
+`common/Version.ets` 的 `OHOS_APP_VERSION` 同步递增，然后重编 HAP 冒烟。
 
 **冲突处理三原则**：
 1. Tier-1 文件冲突 → 说明上游在同名路径加了文件，重命名我们的模块（如 `ohos/` → `ohos_next/`）后保留两者
-2. Tier-3 两处冲突 → 按 PATCH_INVENTORY 的意图重打，非常小
+2. Tier-3 少数几处冲突 → 按 PATCH_INVENTORY 的意图重打，非常小
 3. 上游改了我们依赖的**函数签名**（如 `trait Service`）→ 只改 `src/platform/ohos` 或 `src/ohos` 内的适配，不改上游
 
-**CI 守卫**（后续加）：
-- `apply-mobile-cfg.py --check` 必须通过
-- `git diff origin/master --stat` 中不得出现 `src/` 下的既有文件（除 PATCH_INVENTORY 允许的 2 处）
+**历史记录（别重犯）**：2026-11-01 曾试合 master 头（领先基线 9 个提交），
+零冲突、核心也编过，但按产品口径**不采纳** —— 那 9 个提交当时都还没发版。
+
+**体检口径**（`sync-upstream.sh` 会打印，人工判断）：
+- `git diff --cached --stat <tag> -- src libs Cargo.toml .cargo` —— 增量应只出现在
+  PATCH_INVENTORY 列出的那批文件里；
+- 上游若动了 `nix` / `socket2` / `rdev` / `tokio-native-tls` 版本，`ohos/third_party/`
+  下的 vendored 副本要重新 vendor，这是历史上最容易破的一处；
+- 上游若改了 `libs/scrap` 的 `Capturer` trait 或 `video_service` 接口，鸿蒙采集后端要跟着改。
 
 ---
 
