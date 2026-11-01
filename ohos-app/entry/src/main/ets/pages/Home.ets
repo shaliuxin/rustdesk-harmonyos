@@ -2,7 +2,7 @@ import { router } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { RustDesk, PeerInfo } from '../common/RustDesk';
+import { RustDesk, PeerInfo, UiEvent, ChatEventData } from '../common/RustDesk';
 import { isPhoneForm } from '../common/DeviceForm';
 import { SettingsPage } from './Settings';
 
@@ -82,6 +82,16 @@ struct Home {
   // 开关正在处理中，避免连点重复起停
   @State hostBusy: boolean = false;
 
+  // --- 被控端：当前会话与聊天 ---
+  // 主控连进来后，这里要能看见「有人在控制我」并且能回话。
+  // 消息不落盘，会话结束即清（与上游一致：聊天只活在连接里）。
+  @State hostSessions: number = 0;
+  @State hostChatOpen: boolean = false;
+  @State hostChatText: string = '';
+  @State hostChatMsgs: HostChatMsg[] = [];
+  @State hostChatUnread: number = 0;
+  private nextChatId: number = 1;
+
   aboutToAppear(): void {
     this.isPhone = isPhoneForm();
     this.refresh();
@@ -97,6 +107,10 @@ struct Home {
     // 弹窗回调，都在开关之后才落地，界面必须自己轮询，否则会一直停在旧文案。
     this.pwTimer = setInterval(this.refreshPassword, 2000);
     this.hostTimer = setInterval(this.refreshHostState, 2000);
+
+    // 被控端聊天：主控发来的消息由 Rust 侧转成 'host_chat' 事件。
+    // 会话页只在主控时注册，被控端一直停在首页，必须这里接。
+    RustDesk.on(this.onHostEvent);
   }
 
   // 只在值真的变了才写状态：@State 每次赋值都会触发重渲染。
@@ -115,6 +129,59 @@ struct Home {
     }
     this.hostRunning = RustDesk.hostRunning();
     this.injectStatus = RustDesk.injectionStatus();
+    const n: number = RustDesk.hostSessions();
+    if (n !== this.hostSessions) {
+      this.hostSessions = n;
+      // 对方挂断后把聊天记录清掉：这些消息只属于那一次会话。
+      if (n === 0) {
+        this.hostChatMsgs = [];
+        this.hostChatUnread = 0;
+        this.hostChatOpen = false;
+        this.hostChatText = '';
+      }
+    }
+  }
+
+  // 被控端事件：目前只关心聊天。
+  private onHostEvent = (ev: UiEvent): void => {
+    if (ev.event !== 'host_chat') {
+      return;
+    }
+    const d: ChatEventData = ev.data as ChatEventData;
+    if (d === undefined || d.text === undefined || d.text.length === 0) {
+      return;
+    }
+    this.pushHostChat(d.text, false);
+    if (this.hostChatOpen) {
+      this.hostChatUnread = 0;
+    } else {
+      this.hostChatUnread += 1;
+      promptAction.showToast({ message: `对方发来消息：${d.text}` });
+    }
+  }
+
+  private pushHostChat(text: string, mine: boolean): void {
+    const list: HostChatMsg[] = this.hostChatMsgs.slice();
+    list.push(new HostChatMsg(this.nextChatId++, text, mine));
+    this.hostChatMsgs = list;
+  }
+
+  private sendHostChat(): void {
+    const t: string = this.hostChatText.trim();
+    if (t.length === 0) {
+      return;
+    }
+    if (!RustDesk.hostSendChat(t)) {
+      promptAction.showToast({ message: '发送失败：当前没有活动连接' });
+      return;
+    }
+    this.pushHostChat(t, true);
+    this.hostChatText = '';
+  }
+
+  private openHostChat(): void {
+    this.hostChatUnread = 0;
+    this.hostChatOpen = true;
   }
 
   private setHostPower(on: boolean): void {
@@ -144,6 +211,9 @@ struct Home {
     if (!this.hostRunning) {
       return '未开启';
     }
+    if (this.hostSessions > 0) {
+      return `正在被远程控制（${this.hostSessions} 个会话）`;
+    }
     if (this.injectStatus === 2) {
       return '已开启，等待远程连接';
     }
@@ -151,6 +221,7 @@ struct Home {
   }
 
   aboutToDisappear(): void {
+    RustDesk.off(this.onHostEvent);
     if (this.statusTimer !== -1) {
       clearInterval(this.statusTimer);
       this.statusTimer = -1;
@@ -424,9 +495,105 @@ struct Home {
 
   // ======================= tab 1：连接 =======================
 
+  // 被控时的横幅。放在「连接」tab 最上面：被控期间用户基本停在这一页，
+  // 聊天入口必须在第一屏，不能藏在「共享屏幕」里。
+  @Builder
+  hostBanner() {
+    Row({ space: 10 }) {
+      Text('🖥')
+        .fontSize(18)
+      Column({ space: 2 }) {
+        Text('正在被远程控制')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
+          .width('100%')
+        Text(this.hostSessions > 1 ? `${this.hostSessions} 个会话` : '本机屏幕正在共享')
+          .fontSize(11)
+          .fontColor('#D5E2FF')
+          .width('100%')
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Text(this.hostChatUnread > 0 ? `💬 ${this.hostChatUnread}` : '💬 聊天')
+        .fontSize(14)
+        .fontColor('#FFFFFF')
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor('#33FFFFFF')
+        .borderRadius(9)
+        .onClick(() => { this.openHostChat(); })
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+    .backgroundColor('#1D4E9B')
+    .borderRadius(12)
+    .margin({ bottom: 10 })
+  }
+
+  // 被控端聊天面板（半模态）。
+  @Builder
+  hostChatSheet() {
+    Column() {
+      List({ space: 8 }) {
+        ForEach(this.hostChatMsgs, (m: HostChatMsg) => {
+          ListItem() {
+            Row() {
+              if (m.mine) {
+                Blank()
+              }
+              Text(m.text)
+                .fontSize(14)
+                .fontColor(m.mine ? '#FFFFFF' : C_TEXT)
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor(m.mine ? C_ACCENT : C_CARD)
+                .borderRadius(10)
+                .constraintSize({ maxWidth: '78%' })
+              if (!m.mine) {
+                Blank()
+              }
+            }
+            .width('100%')
+          }
+        }, (m: HostChatMsg) => m.id.toString())
+      }
+      .layoutWeight(1)
+      .width('100%')
+
+      Row({ space: 8 }) {
+        TextInput({ placeholder: '说点什么…', text: this.hostChatText })
+          .layoutWeight(1)
+          .height(44)
+          .fontSize(15)
+          .fontColor(C_TEXT)
+          .placeholderColor(C_FAINT)
+          .backgroundColor(C_CARD)
+          .borderRadius(10)
+          .onChange((v: string) => { this.hostChatText = v; })
+          .onSubmit(() => { this.sendHostChat(); })
+        Text('发送')
+          .fontSize(15)
+          .fontColor('#FFFFFF')
+          .padding({ left: 16, right: 16, top: 11, bottom: 11 })
+          .backgroundColor(C_ACCENT)
+          .borderRadius(10)
+          .onClick(() => { this.sendHostChat(); })
+      }
+      .width('100%')
+      .padding({ top: 8 })
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ left: 16, right: 16, bottom: 16 })
+    .backgroundColor(C_BG)
+  }
+
   @Builder
   connectionTab() {
     Column() {
+      if (this.hostSessions > 0) {
+        this.hostBanner()
+      }
       // 对应 Android 的 _buildRemoteIDTextField：高 84 的卡片，左边输入、右边连接。
       Row() {
         TextInput({ placeholder: '输入远端 ID', text: this.peerId })
@@ -801,5 +968,26 @@ struct Home {
     .width('100%')
     .height('100%')
     .backgroundColor(C_BG)
+    // 被控端聊天：下拉关闭时把状态同步回来，否则下次点不开。
+    .bindSheet($$this.hostChatOpen, this.hostChatSheet(), {
+      height: 420,
+      dragBar: true,
+      showClose: true,
+      title: { title: '聊天' },
+      onDisappear: () => { this.hostChatOpen = false; }
+    })
+  }
+}
+
+// 被控端的一条聊天消息。ArkTS 不允许对象字面量当类型，必须显式建类。
+class HostChatMsg {
+  id: number = 0;
+  text: string = '';
+  mine: boolean = false;
+
+  constructor(id: number, text: string, mine: boolean) {
+    this.id = id;
+    this.text = text;
+    this.mine = mine;
   }
 }

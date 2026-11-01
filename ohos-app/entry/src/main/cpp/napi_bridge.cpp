@@ -198,6 +198,21 @@ napi_value JsHostState(napi_env env, napi_callback_info /*info*/) {
     return MakeInt(env, rustdesk_ohos_host_state());
 }
 
+// 被控端回话：把一段文字发给正在控制本机的主控。
+napi_value JsHostSendChat(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    std::string text;
+    if (argc < 1 || !GetStringArg(env, args[0], text)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_host_send_chat(text.c_str()));
+}
+
+napi_value JsHostSessions(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_host_sessions());
+}
+
 napi_value JsInjectionStatus(napi_env env, napi_callback_info /*info*/) {
     return MakeInt(env, rustdesk_ohos_injection_status());
 }
@@ -744,6 +759,8 @@ napi_value Init(napi_env env, napi_value exports) {
         {"hostStart", nullptr, JsHostStart, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"hostStop", nullptr, JsHostStop, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"hostState", nullptr, JsHostState, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hostSendChat", nullptr, JsHostSendChat, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hostSessions", nullptr, JsHostSessions, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"injectionStatus", nullptr, JsInjectionStatus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"requestInjection", nullptr, JsRequestInjection, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"init", nullptr, JsInit, nullptr, nullptr, nullptr, napi_default, nullptr},

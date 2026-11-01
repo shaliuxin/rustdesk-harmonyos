@@ -233,6 +233,12 @@ int32_t rustdesk_ohos_host_start(void);       // 起采集 + 注册 + 监听
 int32_t rustdesk_ohos_host_stop(void);        // 断会话 + 停采集 + 撤授权
 int32_t rustdesk_ohos_host_state(void);       // 0 停止 / 1 运行中
 
+// 被控端聊天：主控发来的消息走 UI 事件 "host_chat"；回话调下面这个。
+// 返回 0 成功 / -1 表示当前没有被控连接。
+int32_t rustdesk_ohos_host_send_chat(const char *text);
+// 当前被控连接数（>0 即「正在被控」）。
+int32_t rustdesk_ohos_host_sessions(void);
+
 // 键鼠注入授权：0 未授权 / 1 授权中 / 2 已授权
 int32_t rustdesk_ohos_injection_status(void);
 int32_t rustdesk_ohos_request_injection(void);

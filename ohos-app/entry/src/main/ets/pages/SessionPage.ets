@@ -1605,11 +1605,10 @@ struct SessionPage {
       this.barBtn('▣', '显示器', '#FFFFFF', () => { this.openDisplayPicker(); })
       this.barBtn('⌨', '键盘', this.kbVisible ? '#FFD54F' : '#FFFFFF',
         () => { this.toggleKeyboard(); })
-      this.barBtn('↕', '滚动', this.scrollMode ? '#FFD54F' : '#FFFFFF',
-        () => { this.toggleScroll(); })
       this.barBtn('⌘', 'CAD', '#FFFFFF', () => { this.sendCtrlAltDel(); })
       this.barBtn('💬', this.chatUnread > 0 ? `聊天(${this.chatUnread})` : '聊天',
         this.chatOpen ? '#FFD54F' : '#FFFFFF', () => { this.toggleChat(); })
+      this.barBtn('📁', '文件', '#FFFFFF', () => { this.openFiles(); })
       this.barBtn('⋮', '更多', '#FFFFFF', () => { this.openMore(); })
       Blank()
       this.barBtn('⌄', '收起', '#FFFFFF', () => { this.barVisible = false; })
@@ -1649,6 +1648,31 @@ struct SessionPage {
   private disconnect(): void {
     RustDesk.closeSession();
     router.back();
+  }
+
+  // 切到文件传输。
+  //
+  // 全局只有一个会话槽（Rust 侧 SESSION 是单例），而文件传输用的是另一种
+  // 连接类型（ConnType::FILE_TRANSFER），没法在现有控制会话里「顺手」打开 ——
+  // 必须先把画面会话让出去。实话实说，别让用户以为画面无故断了。
+  private openFiles(): void {
+    const id: string = this.peerId;
+    promptAction.showDialog({
+      title: '文件传输',
+      message: '文件传输使用独立连接，进入后当前远程画面会断开。传输完成后可从首页重新连接。',
+      buttons: [
+        { text: '取消', color: '#8A94A6' },
+        { text: '进入', color: '#0071FF' }
+      ]
+    }).then((res: promptAction.ShowDialogSuccessResponse) => {
+      if (res.index !== 1) {
+        return;
+      }
+      RustDesk.closeSession();
+      router.replaceUrl({ url: 'pages/FilePage', params: { peerId: id } }).catch((e: Error) => {
+        promptAction.showToast({ message: `打开文件传输失败：${e.message}` });
+      });
+    }).catch(() => {});
   }
 
   // Android 点 📺 是弹出「显示器 / 视图」菜单让用户选（remote_page.dart:622
@@ -1751,6 +1775,14 @@ struct SessionPage {
     if (!isAndroid) {
       out.push(new MoreItem('发送剪贴板按键', () => { this.sendClipboardKeystrokes(); }));
     }
+    // 文件传输本来是底栏按钮，手机上底栏放不下时从这里也能进；
+    // 滚动模式同理（触屏手势用，平板上底栏留给了文件）。
+    out.push(new MoreItem('文件传输', () => {
+      this.moreVisible = false;
+      this.openFiles();
+    }));
+    out.push(new MoreItem(this.scrollMode ? '关闭滚动模式' : '滚动模式',
+      () => { this.toggleScroll(); }, this.scrollMode ? '开启中' : ''));
     out.push(new MoreItem('重置画布', () => { this.resetCanvas(); }));
     out.push(new MoreItem('插入 Ctrl + Alt + Del', () => { this.sendCtrlAltDel(); }));
     out.push(new MoreItem('锁定屏幕', () => { this.lockScreen(); }));

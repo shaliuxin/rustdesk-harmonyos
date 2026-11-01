@@ -33,6 +33,7 @@
 #include <ctime>
 #include <dlfcn.h>
 #include <mutex>
+#include <pwd.h>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -170,8 +171,47 @@ int32_t ohos_device_type(void) {
 // 用户名/用户 ID：OHOS 没有给普通应用读「当前登录账号名」的 NDK 接口
 // （account 子系统是系统 API）。RustDesk 用它们只是为了在远端的
 // 「已连接用户」里显示，拿不到就给空串，不影响任何功能。
-char* ohos_get_active_user_name(void) { return DupString(""); }
-char* ohos_get_active_user_id(void) { return DupString(""); }
+// 被控端上报的「当前用户」。
+//
+// 这个字段不是 RustDesk 账号（自建服务器根本没有账号体系），而是**操作系统**的
+// 登录用户。上游 `handle_peer_info` 用它做一道判断：文件传输连接里如果
+// `username` 为空且没有窗口会话，就认为是「锁屏 / 无人值守」，主控端会直接报
+// "No active console user logged on, please connect and logon first." 并关掉连接。
+// 鸿蒙没有多用户/控制台会话的概念，返回空串必然被误判，所以这里**必须**给一个
+// 非空值；拿不到 POSIX 用户名就用系统名兜底。
+char* ohos_get_active_user_name(void) {
+    static std::mutex mtx;
+    static std::string cached;
+    static bool resolved = false;
+    std::lock_guard<std::mutex> lock(mtx);
+    if (!resolved) {
+        resolved = true;
+        const char* env = getenv("USER");
+        if (env != nullptr && env[0] != '\0') {
+            cached = env;
+        } else {
+            struct passwd* pw = getpwuid(getuid());
+            if (pw != nullptr && pw->pw_name != nullptr && pw->pw_name[0] != '\0') {
+                cached = pw->pw_name;
+            } else {
+                cached = "HarmonyOS";
+            }
+        }
+    }
+    return DupString(cached.c_str());
+}
+
+char* ohos_get_active_user_id(void) {
+    static std::mutex mtx;
+    static std::string cached;
+    static bool resolved = false;
+    std::lock_guard<std::mutex> lock(mtx);
+    if (!resolved) {
+        resolved = true;
+        cached = std::to_string(getuid());
+    }
+    return DupString(cached.c_str());
+}
 
 // 锁屏状态：同上，属于系统 API。恒报「未锁定」是安全的选择吗？
 // 不是 —— 但如果这里报 true，RustDesk 会拒绝发起被控连接；报 false

@@ -97,6 +97,10 @@ export interface RustDeskNative {
   hostStop(): number;
   /** 0 停止 / 1 运行中 */
   hostState(): number;
+  /** 被控端回话给主控。0 成功，-1 表示当前没有连接 */
+  hostSendChat(text: string): number;
+  /** 当前被控连接数（>0 = 有人正在控制本机） */
+  hostSessions(): number;
   /** 键鼠注入授权：0 未授权 / 1 授权中 / 2 已授权 */
   injectionStatus(): number;
   /** 触发系统授权弹窗，结果是异步的，用 injectionStatus() 复查 */

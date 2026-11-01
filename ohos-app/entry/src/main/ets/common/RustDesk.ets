@@ -497,6 +497,16 @@ export class RustDesk {
     return native.hostState() === 1;
   }
 
+  /** 当前被控连接数。>0 说明有人正在控制本机。 */
+  static hostSessions(): number {
+    return native.hostSessions();
+  }
+
+  /** 被控端回话：把文字发给正在控制本机的主控。 */
+  static hostSendChat(text: string): boolean {
+    return native.hostSendChat(text) === 0;
+  }
+
   /** 注入授权：0 未授权 / 1 授权中 / 2 已授权。 */
   static injectionStatus(): number {
     return native.injectionStatus();

@@ -1666,3 +1666,27 @@ pub extern "C" fn rustdesk_ohos_files_confirm(
         is_upload != 0,
     );
 }
+
+// ---------------------------------------------------------------------------
+// 被控端：聊天与状态
+// ---------------------------------------------------------------------------
+
+/// 被控端主动发一条聊天给主控。0 成功，-1 表示当前没有被控连接。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_host_send_chat(text: *const c_char) -> c_int {
+    let text = match cstr_arg(text) {
+        Some(v) if !v.trim().is_empty() => v,
+        _ => return -1,
+    };
+    if crate::server::ohos_send_host_chat(&text) {
+        0
+    } else {
+        -1
+    }
+}
+
+/// 当前被控连接数。首页用它显示「正在被控」。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_host_sessions() -> c_int {
+    crate::server::Connection::alive_conns().len() as c_int
+}
