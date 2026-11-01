@@ -3,6 +3,7 @@ import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { common, Want } from '@kit.AbilityKit';
 import { RustDesk } from '../common/RustDesk';
+import { appVersionLabel } from '../common/Version';
 
 // 关于页。
 //
@@ -24,8 +25,8 @@ const C_FAINT: string = '#5A6478';
 const C_ACCENT: string = '#0071FF';
 const C_DIVIDER: string = '#1F2A3D';
 
-// 与 AppScope/app.json5 的 versionName 保持一致，并追加鸿蒙版署名。
-const APP_VERSION: string = '1.5.1 鸿蒙版 by 刘馨';
+// 版本串由 common/Version.ets 统一生成：`0.1.0 (1.5.1) for HarmonyOS`。
+// 前半段是鸿蒙版自己的版本基数，括号里是上游 RustDesk 的核心版本。
 
 const URL_HOME: string = 'https://rustdesk.com/';
 const URL_PRIVACY: string = 'https://rustdesk.com/privacy.html';
@@ -36,8 +37,11 @@ struct About {
   @State coreVersion: string = '';
   @State abiVersion: number = 0;
   @State myId: string = '';
+  // 完整版本串，见 common/Version.ets
+  @State appVersion: string = '';
 
   aboutToAppear(): void {
+    this.appVersion = appVersionLabel();
     this.coreVersion = RustDesk.coreVersion();
     this.myId = RustDesk.getConfig().id;
   }
@@ -145,7 +149,7 @@ struct About {
 
           // --- 版本 ---
           Column() {
-            this.infoRow('应用版本', APP_VERSION, false, () => { this.copy(APP_VERSION); })
+            this.infoRow('应用版本', this.appVersion, false, () => { this.copy(this.appVersion); })
             Divider().color(C_DIVIDER)
             this.infoRow('核心版本', this.coreVersion, false, () => { this.copy(this.coreVersion); })
             Divider().color(C_DIVIDER)

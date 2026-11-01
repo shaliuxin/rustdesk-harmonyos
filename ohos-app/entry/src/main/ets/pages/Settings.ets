@@ -1,6 +1,7 @@
 import { promptAction, router } from '@kit.ArkUI';
 import { RustDesk, ServerConfig } from '../common/RustDesk';
 import { isPhoneForm } from '../common/DeviceForm';
+import { appVersionLabel } from '../common/Version';
 
 // 设置页。
 //
@@ -83,9 +84,10 @@ const CODECS: ViewOption[] = [
   new ViewOption('h265', 'H265'),
 ];
 
-// 与 AppScope/app.json5 的 versionName 保持一致。About.ets 里也有一份，
-// 改版本号时两处都要动（这里和 About.ets）。跟随上游 RustDesk 版本（Cargo.toml）。
-const APP_VERSION: string = '1.5.1 鸿蒙版 by 刘馨';
+// 版本串统一由 common/Version.ets 生成：`0.1.0 (1.5.1) for HarmonyOS`。
+// 括号里是上游 RustDesk 的核心版本（native 读回，不在这里手写）。
+// 包版本（app.json5 的 versionName / versionCode）仍需与 Version.ets 的
+// OHOS_APP_VERSION 同步手动改。
 
 // 颜色：与 MyTheme / 其他页面保持一致
 const C_BG: string = '#0B1220';
@@ -169,10 +171,13 @@ export struct SettingsPage {
   private statusTimer: number = -1;
   // 手机形态：隐藏「共享屏幕」（被控端）相关设置
   @State isPhone: boolean = false;
+  // 版本串（`0.1.0 (1.5.1) for HarmonyOS`），aboutToAppear 里取一次。
+  @State appVersion: string = '';
 
   aboutToAppear(): void {
     // 手机上没有「共享屏幕」页，被控端的策略项跟着一起隐藏。
     this.isPhone = isPhoneForm();
+    this.appVersion = appVersionLabel();
     this.load();
     // 后台看门狗每 3 秒探测一次，这里 1 秒读一次结果即可 —— 与上游
     // `server_model.dart` 里 1 秒的 timerCallback 节奏一致。
@@ -785,7 +790,7 @@ export struct SettingsPage {
           this.sectionTitle('关于')
 
           SettingCard() {
-            this.linkRow('版本', APP_VERSION, () => {
+            this.linkRow('版本', this.appVersion, () => {
               router.pushUrl({ url: 'pages/About' }).catch(() => {
               promptAction.showToast({ message: '打开关于页失败' });
               });
