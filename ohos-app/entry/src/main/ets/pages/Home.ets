@@ -6,11 +6,16 @@ import { RustDesk, PeerInfo, UiEvent, ChatEventData } from '../common/RustDesk';
 import { isPhoneForm } from '../common/DeviceForm';
 import { SettingsPage } from './Settings';
 
-// 主页：AppBar + 底部四个 tab（连接 / 聊天 / 共享屏幕 / 设置）。
+// 主页：AppBar + 底部三个 tab（连接 / 共享屏幕 / 设置）。
 //
 // 结构照 RustDesk Android 的 HomePage 来：`flutter/lib/mobile/pages/home_page.dart`
 // 用 Scaffold + BottomNavigationBar，Android 上依次是 ConnectionPage、ChatPage、
 // ServerPage、SettingsPage。这里用 ArkUI 的 Tabs（barPosition = End）对应。
+//
+// 唯独**没有** ChatPage：安卓那一页列的是「RustDesk 账号的好友/会话列表」，
+// 而自建服务器根本没有账号体系，页面永远是空壳（原先是「聊天暂未启用」）。
+// 点对点聊天在两个真正需要它的地方：主控端在会话页底栏 💬，被控端在连接页
+// 顶部的「正在被远程控制」横幅里，都不依赖账号。
 //
 // 配色取上游 MyTheme 的深色值（flutter/lib/common.dart）：
 //   accent #0071FF、idColor #00B6F0、button #2C8CFF、darkGray #949494。
@@ -684,31 +689,7 @@ struct Home {
     .padding({ left: 10, right: 10, top: 10 })
   }
 
-  // ======================= tab 2：聊天 =======================
-
-  @Builder
-  chatTab() {
-    Column() {
-      Text('💬')
-        .fontSize(48)
-        .margin({ bottom: 16 })
-      Text('聊天暂未启用')
-        .fontSize(17)
-        .fontColor(C_TEXT)
-        .margin({ bottom: 8 })
-      Text('Android 版这一页依赖 RustDesk 账号登录后拉取会话列表。\n鸿蒙版目前打通的是主控链路，会话内的文字可在远程页用 ⌨ 输入。')
-        .fontSize(13)
-        .fontColor(C_DIM)
-        .textAlign(TextAlign.Center)
-        .lineHeight(20)
-    }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
-    .padding({ left: 32, right: 32 })
-  }
-
-  // ======================= tab 3：共享屏幕 =======================
+  // ======================= tab：共享屏幕 =======================
 
   @Builder
   serverTab() {
@@ -933,25 +914,20 @@ struct Home {
         }
         .tabBar(this.tabItem(0, '⇄', '连接'))
 
-        TabContent() {
-          this.chatTab();
-        }
-        .tabBar(this.tabItem(1, '💬', '聊天'))
-
         // 手机形态没有「共享屏幕」：被控端在手机上无法实现（平台无输入注入
         // 接口），留着只会是个永远「服务未运行」的死页面。
         if (!this.isPhone) {
           TabContent() {
             this.serverTab();
           }
-          .tabBar(this.tabItem(2, '▣', '共享屏幕'))
+          .tabBar(this.tabItem(1, '▣', '共享屏幕'))
         }
 
         TabContent() {
           SettingsPage();
         }
-        // 手机上「设置」是第 3 档（索引 2），桌面/2in1 上是第 4 档（索引 3）。
-        .tabBar(this.tabItem(this.isPhone ? 2 : 3, '⚙', '设置'))
+        // 手机上「设置」是第 2 档（索引 1），桌面/2in1 上是第 3 档（索引 2）。
+        .tabBar(this.tabItem(this.isPhone ? 1 : 2, '⚙', '设置'))
       }
       .layoutWeight(1)
       .barBackgroundColor(C_BG)
@@ -959,8 +935,8 @@ struct Home {
       .onChange((index: number) => {
         this.currentTab = index;
         // 切回连接/共享时列表和 ID 可能已经变了。
-        // 手机上索引 2 是「设置」，不需要刷新主控数据。
-        if (index === 0 || (!this.isPhone && index === 2)) {
+        // 手机上索引 1 是「设置」，不需要刷新主控数据。
+        if (index === 0 || (!this.isPhone && index === 1)) {
           this.refresh();
         }
       })
