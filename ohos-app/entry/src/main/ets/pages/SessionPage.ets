@@ -95,12 +95,14 @@ const MOUSE_AFTER_TOUCH_MS: number = 300;
 // 滚轮：ArkUI 轴事件给的是 vp，触控板一次给几 vp、鼠标一格给十几 vp。
 // 攒够这个量才发一格滚轮，避免触控板一划刷出几十个事件。
 const AXIS_VP_PER_STEP: number = 15;
-// AxisAction：NONE=0 BEGIN=1 UPDATE=2 END=3 CANCEL=4。
-// 用数值常量而不是枚举：AxisAction 是 @since 17 的枚举，直接引用在低版本
-// 运行时上会取不到值，而数值永远可用。
-const AXIS_ACTION_BEGIN: number = 1;
-const AXIS_ACTION_END: number = 3;
-const AXIS_ACTION_CANCEL: number = 4;
+// SourceTool.TOUCHPAD 的数值（枚举是 @since 12，低版本运行时直接引用取不到值）。
+const SOURCE_TOOL_TOUCHPAD: number = 4;
+// 两组滚动之间的静默间隔：超过它就当成「新的一组」。
+// 不用 AxisAction 的 BEGIN/END 分组的理由见 handleAxis。
+const AXIS_GROUP_GAP_MS: number = 120;
+// 鼠标滚轮一次物理咔哒会连来 2~3 条轴事件（实测 44ms 内 3 条），
+// 这个窗口内的后续事件不再补发，保证「一咔哒 = 一格」。
+const AXIS_WHEEL_DEDUPE_MS: number = 60;
 
 // --- 设备形态判定 ---------------------------------------------------------
 // 为什么需要它：鼠标事件通道（onMouse/onHover）在 DevEco 模拟器上是坏的 ——
@@ -247,11 +249,15 @@ struct SessionPage {
   private lastDownTs: number = 0;
   // 鼠标通道是否真的注册（见 isRealDesktopDevice / MouseChannelModifier）。
   private mouseMod: MouseChannelModifier = new MouseChannelModifier(isRealDesktopDevice());
-  // 滚轮累计量（vp），攒够 AXIS_VP_PER_STEP 才发一格；以及「一组轴事件只发一格」的闸门。
+  // 滚轮/触控板的累计量（vp），攒够 AXIS_VP_PER_STEP 才发一格；
+  // axisGroupTs 用来按「静默间隔」切分滚动组，不依赖 action 的 BEGIN/END。
   private axisAccum: number = 0;
+  private axisSideAccum: number = 0;
+  private axisGroupTs: number = 0;
   private axisLogTs: number = 0;
-  private axisGesture: boolean = false;
-  private axisSent: boolean = false;
+  // 最近一次发给远端的鼠标位置（远端坐标）。轴事件没带合法落点时沿用它。
+  private lastRemoteX: number = -1;
+  private lastRemoteY: number = -1;
 
   // --- 质量监视器（设置页「显示质量监视器」）------------------------------
   // 数据源：Rust 的 update_quality_status，约 1 秒一条 quality_status 事件。
@@ -788,6 +794,8 @@ struct SessionPage {
       return;
     }
     this.lastMouseSig = sig;
+    this.lastRemoteX = x;
+    this.lastRemoteY = y;
     RustDesk.mouse(mask, x, y, this.mods);
   }
 
@@ -873,74 +881,83 @@ struct SessionPage {
   // 正数=向上滚。位置不会因为滚轮而改变，所以先补一发 MOVE 把远端光标
   // 移到指针所在处，再发滚轮 —— 否则滚动会作用在上一次点击的位置上。
   private handleAxis(ev: AxisEvent): void {
-    // 入口诊断：轴事件到底有没有进来、指针落点在哪。限频 200ms 防刷屏。
+    const nowTs: number = Date.now();
+    const v: number = ev.getVerticalAxisValue();
+    const hv: number = ev.getHorizontalAxisValue();
+    // 入口诊断：轴事件到底有没有进来、轴值多少、来自滚轮还是触控板。
     // 注意 hilog **不支持 %{public}f**（实测打印成 "}f" 并把后面的参数全部错位），
     // 浮点一律乘 100 取整后按整数打。
-    const nowTs: number = Date.now();
     if (nowTs - this.axisLogTs > 200) {
       this.axisLogTs = nowTs;
       hilog.info(DOMAIN, TAG,
-        'axis in act=%{public}d x=%{public}d y=%{public}d v=%{public}d h=%{public}d tool=%{public}d remote=%{public}dx%{public}d',
-        ev.action, Math.round(ev.x), Math.round(ev.y), Math.round(ev.getVerticalAxisValue() * 100),
-        Math.round(ev.getHorizontalAxisValue() * 100), ev.sourceTool, this.remoteW, this.remoteH);
+        'axis in act=%{public}d src=%{public}d tool=%{public}d x=%{public}d y=%{public}d v=%{public}d h=%{public}d remote=%{public}dx%{public}d',
+        ev.action, ev.source, ev.sourceTool, Math.round(ev.x), Math.round(ev.y),
+        Math.round(v * 100), Math.round(hv * 100), this.remoteW, this.remoteH);
     }
     if (this.remoteW <= 0 || this.remoteH <= 0) {
       return;
     }
-    if (Date.now() - this.lastTouchTs < MOUSE_AFTER_TOUCH_MS) {
-      return;
-    }
-    const v: number = ev.getVerticalAxisValue();
-    const hv: number = ev.getHorizontalAxisValue();
     if ((!Number.isFinite(v) || v === 0) && (!Number.isFinite(hv) || hv === 0)) {
       return;
     }
+    // 这里**不能**再用「刚触摸过就丢」的闸门（lastTouchTs）：触控板双指和滚轮
+    // 都不产生触摸事件，而「触屏点一下、紧接着用触控板滚动」是很常见的动作，
+    // 300ms 的闸门会把整条手势吞掉 —— 表现正是「触控板双指没反应」。
     const ax: number = ev.x as number;
     const ay: number = ev.y as number;
-    if (!Number.isFinite(ax) || !Number.isFinite(ay)) {
+    let px: number = -1;
+    let py: number = -1;
+    if (Number.isFinite(ax) && Number.isFinite(ay) &&
+      ay >= 56 && ay <= this.areaH - 56) {
+      const q: Position = this.toRemote(ax, ay);
+      px = q.x;
+      py = q.y;
+    } else if (this.lastRemoteX >= 0) {
+      // 指针压在顶栏/工具栏上时，滚动仍应作用在远端当前光标处。
+      px = this.lastRemoteX;
+      py = this.lastRemoteY;
+    } else {
       return;
     }
-    // 顶栏、软键盘条不是远端画面。
-    // 顶栏 56vp、底部 56vp（工具栏 / 软键盘条）都不是远端画面。
-    if (ay < 56 || ay > this.areaH - 56) {
-      return;
-    }
-    const p: Position = this.toRemote(ax, ay);
     // 滚轮协议里**不带位置**：服务端 WHEEL 分支把 x 当横向滚动量、y 当纵向
     // 滚动量（input_service.rs: 先 `let x = -evt.x;` 再 mouse_scroll_x/y），
-    // 滚动发生在「远端光标当前所在处」。所以位置要靠这一次 MOVE 补，
-    // 而滚轮包里的 x 必须是 0 —— 之前把 p.x 传进去，服务端会当成
-    // 横向滚动 -1600*120 格，纵向那一下就被这个巨大横滚盖掉了。
-    this.sendMove(this.currentMoveMask(), p.x, p.y);
-
-    const act: number = ev.action as number;
-    const isTouchpad: boolean = ev.sourceTool === 4;
-    // 一格滚轮 = 一组 BEGIN..UPDATE..END 事件（实测一次物理滚动 44ms 内来 3 条）。
-    // 鼠标按「每组发一格」计数；触控板按 vp 累计（AXIS_VP_PER_STEP）。
-    if (act === AXIS_ACTION_BEGIN) {
-      this.axisGesture = true;
-      this.axisSent = false;
-    } else if (act === AXIS_ACTION_END || act === AXIS_ACTION_CANCEL) {
-      this.axisGesture = false;
-      this.axisSent = false;
-    }
+    // 滚动发生在「远端光标当前所在处」。所以位置要靠一次 MOVE 补，
+    // 而滚轮包里的 x 必须是**横向滚动量**，不能塞坐标 —— 之前把 p.x 传进去，
+    // 服务端会当成横向滚动 -1600*120 格，纵向那一下被这个巨大横滚盖掉。
+    // 这条 MOVE 等确认真的要发滚轮时再补（见函数末尾），避免触控板还在
+    // 累计阶段就刷一串无意义的移动包。
+    const isTouchpad: boolean = ev.sourceTool === SOURCE_TOOL_TOUCHPAD;
+    // 分「一组」不再看 action：不同设备/系统版本给 BEGIN/END 的时机并不一致
+    // （触控板实测只给 NONE），一旦 END 不来，原来的 axisSent 会永久卡住，
+    // 表现为「滚一次之后就再也滚不动」。改成按时间切组：静默超过
+    // AXIS_GROUP_GAP_MS 的第一次事件 = 新一组。
+    const gap: number = nowTs - this.axisGroupTs;
+    this.axisGroupTs = nowTs;
+    const newGroup: boolean = gap > AXIS_GROUP_GAP_MS;
 
     let dx: number = 0;
     let dy: number = 0;
     if (isTouchpad) {
+      // 触控板双指：轴值是**位移像素**（不是角度），按 vp 累计，攒够一格发一次。
       this.axisAccum += v;
+      this.axisSideAccum += hv;
       const steps: number = Math.trunc(this.axisAccum / AXIS_VP_PER_STEP);
-      if (steps === 0) {
+      const sideSteps: number = Math.trunc(this.axisSideAccum / AXIS_VP_PER_STEP);
+      if (steps === 0 && sideSteps === 0) {
         return;
       }
       this.axisAccum -= steps * AXIS_VP_PER_STEP;
-      dy = Math.max(-5, Math.min(5, steps)) > 0 ? -1 : 1;
+      this.axisSideAccum -= sideSteps * AXIS_VP_PER_STEP;
+      // 一次事件里累计出的格数可能很多，单包最多带 5 格，避免远端画面瞬移。
+      dy = steps > 0 ? Math.min(5, steps) : Math.max(-5, steps);
+      dx = sideSteps > 0 ? Math.min(5, sideSteps) : Math.max(-5, sideSteps);
     } else {
-      if (this.axisSent) {
-        return;  // 同一组只发一格，避免一次物理滚动刷成 3 格
+      // 鼠标滚轮：轴值是角度，一次物理咔哒会连来 2~3 条事件（实测 44ms 内 3 条），
+      // 用时间窗去重，同一咔哒只发一格。
+      if (!newGroup && gap < AXIS_WHEEL_DEDUPE_MS) {
+        return;
       }
-      this.axisSent = true;
-      // 横向优先：横向轴值更大就当横向滚动（触控板、Shift+滚轮）。
+      // 横向优先：横向轴值更大就当横向滚动（Shift+滚轮）。
       if (Math.abs(hv) > Math.abs(v)) {
         dx = hv > 0 ? -1 : 1;
       } else {
@@ -955,7 +972,9 @@ struct SessionPage {
       dy = -dy;
     }
     hilog.info(DOMAIN, TAG, 'wheel v=%{public}d -> dx=%{public}d dy=%{public}d at %{public}d,%{public}d',
-      Math.round(v * 100), dx, dy, p.x, p.y);
+      Math.round(v * 100), dx, dy, px, py);
+    // 先落位再滚：远端的滚轮作用在「光标当前位置」。
+    this.sendMove(this.currentMoveMask(), px, py);
     RustDesk.mouse(mouseMask(MouseButton.WHEEL, MouseType.WHEEL), dx, dy, this.mods);
   }
 

@@ -213,15 +213,39 @@ void OnInjectAuthorized(int32_t status) {
 typedef int32_t (*FnRequestInjection)(void (*)(int32_t));
 typedef int32_t (*FnQueryAuthorized)(int32_t*);
 
+// 为什么不用 dlsym(RTLD_DEFAULT)：libohinput.so 虽然是本 .so 的 NEEDED 依赖，
+// 但系统把它加载在**局部**符号作用域里，RTLD_DEFAULT 这条全局链上查不到它导出
+// 的符号 —— 实测 dlsym(RTLD_DEFAULT, "OH_Input_RequestInjection") 恒为 null，
+// 于是整个注入授权流程一直在走「系统不支持」的降级分支（日志里那句
+// "unavailable (system < API 20)" 其实是假的，设备是 API 26）。
+// 正确做法：对库本身取 handler 再查。库已加载，dlopen 只是引用计数 +1。
+void* InputLibHandle() {
+    static void* h = dlopen("libohinput.so", RTLD_NOW | RTLD_LOCAL);
+    if (h == nullptr) {
+        const char* err = dlerror();
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "dlopen libohinput.so failed: %{public}s", err ? err : "?");
+    }
+    return h;
+}
+
 FnRequestInjection ResolveRequestInjection() {
-    static FnRequestInjection fn = reinterpret_cast<FnRequestInjection>(
-        dlsym(RTLD_DEFAULT, "OH_Input_RequestInjection"));
+    static FnRequestInjection fn = []() -> FnRequestInjection {
+        void* h = InputLibHandle();
+        return h ? reinterpret_cast<FnRequestInjection>(
+                       dlsym(h, "OH_Input_RequestInjection"))
+                 : nullptr;
+    }();
     return fn;
 }
 
 FnQueryAuthorized ResolveQueryAuthorized() {
-    static FnQueryAuthorized fn = reinterpret_cast<FnQueryAuthorized>(
-        dlsym(RTLD_DEFAULT, "OH_Input_QueryAuthorizedStatus"));
+    static FnQueryAuthorized fn = []() -> FnQueryAuthorized {
+        void* h = InputLibHandle();
+        return h ? reinterpret_cast<FnQueryAuthorized>(
+                       dlsym(h, "OH_Input_QueryAuthorizedStatus"))
+                 : nullptr;
+    }();
     return fn;
 }
 
@@ -241,7 +265,7 @@ int32_t ohos_input_request_authorization(void) {
     FnRequestInjection fn = ResolveRequestInjection();
     if (fn == nullptr) {
         OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG,
-                     "OH_Input_RequestInjection unavailable (system < API 20)");
+                     "OH_Input_RequestInjection not found in libohinput.so");
         return -2;
     }
     int32_t rc = fn(OnInjectAuthorized);
