@@ -1800,6 +1800,13 @@ impl<T: InvokeUiSession> Interface for Session<T> {
     fn send(&self, data: Data) {
         if let Some(sender) = self.sender.read().unwrap().as_ref() {
             sender.send(data).ok();
+        } else {
+            // io_loop 还没起来（或已退出）时输入会被静默丢弃，这里必须喊出来，
+            // 否则现象就是「点了没反应」，而且日志里一条线索都没有。
+            #[cfg(target_env = "ohos")]
+            if matches!(data, Data::Message(ref m) if matches!(m.union, Some(message::Union::MouseEvent(_)) | Some(message::Union::KeyEvent(_)))) {
+                log::warn!("send: no io_loop sender, input dropped");
+            }
         }
     }
 

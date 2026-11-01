@@ -498,7 +498,7 @@ pub trait KeyboardControllable {
     fn get_key_state(&mut self, key: Key) -> bool;
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 struct Enigo;
 
 impl Enigo {
@@ -511,9 +511,9 @@ impl Enigo {
     /// let mut enigo = Enigo::new();
     /// ```
     pub fn new() -> Self {
-        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
         return Enigo {};
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
         Self::default()
     }
 }

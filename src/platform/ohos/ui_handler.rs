@@ -23,8 +23,18 @@ use scrap::ImageRgb;
 use serde_json::json;
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, RwLock,
+    },
 };
+
+/// 会话号发生器。「重连顶掉旧会话」时用它区分事件归属：
+/// 事件经 napi 异步投递，旧会话的退出通知可能晚几秒才到 ArkTS，
+/// 那时新会话已经在跑，晚到的事件会把新会话的 UI 误标成「已断开」。
+static NEXT_SID: AtomicU64 = AtomicU64::new(1);
+/// 当前活跃会话的号；0 表示没有活跃会话（主动关闭后置 0）。
+pub static CURRENT_SID: AtomicU64 = AtomicU64::new(0);
 
 /// 单个显示器的帧槽。
 ///
@@ -58,10 +68,22 @@ struct UiState {
     displays: Vec<DisplayInfo>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct OhosUiSession {
     frames: Arc<RwLock<HashMap<usize, FrameSlot>>>,
     state: Arc<RwLock<UiState>>,
+    /// 会话号。见 [`CURRENT_SID`]。
+    pub sid: u64,
+}
+
+impl Default for OhosUiSession {
+    fn default() -> Self {
+        Self {
+            frames: Default::default(),
+            state: Default::default(),
+            sid: NEXT_SID.fetch_add(1, Ordering::SeqCst),
+        }
+    }
 }
 
 impl OhosUiSession {
@@ -234,12 +256,33 @@ impl InvokeUiSession for OhosUiSession {
     }
 
     fn close_success(&self) {
-        self.with_state(|s| s.connected = false);
-        emit("close", json!({ "reason": "success" }));
+        // 上游的语义**不是**「断线」：它在收到第一帧视频时调用（io_loop.rs
+        // `handle_msg_from_peer` 的 VideoFrame 分支），意思是「连接真正建立了，
+        // 把『正在连接』的进度框关掉」。桌面版对应 closeSuccess()，Flutter 版
+        // 直接是空实现。
+        //
+        // 早先这里发了一条 "close" 事件，于是画面刚出来的瞬间 UI 就显示
+        // 『连接已断开』，`connected` 也随之变 false —— 鼠标键盘还都以它为闸门，
+        // 结果画面在动、输入全废。
+        emit("close_connecting", json!(null));
     }
 
     fn update_quality_status(&self, qs: QualityStatus) {
-        emit("quality_status", json!({ "status": format!("{:?}", qs) }));
+        // 结构化 JSON（以前是 format!("{:?}") 的调试串，ArkTS 没法可靠解析）。
+        // fps 是按显示器的 map，鸿蒙端单显示器场景取最大值即可；
+        // speed / codec_format 等缺省时给空串，UI 按空值跳过。
+        let fps = qs.fps.values().copied().max().unwrap_or(0);
+        emit(
+            "quality_status",
+            json!({
+                "speed": qs.speed.clone().unwrap_or_default(),
+                "fps": fps,
+                "delay": qs.delay.unwrap_or(0),
+                "target_bitrate": qs.target_bitrate.unwrap_or(0),
+                "codec_format": qs.codec_format.map(|f| format!("{:?}", f)).unwrap_or_default(),
+                "chroma": qs.chroma.clone().unwrap_or_default(),
+            }),
+        );
     }
 
     fn set_connection_type(&self, is_secured: bool, direct: bool, stream_type: &str) {

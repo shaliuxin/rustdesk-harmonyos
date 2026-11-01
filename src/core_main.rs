@@ -1,11 +1,11 @@
 #[cfg(target_os = "windows")]
 use crate::client::translate;
 #[cfg(not(debug_assertions))]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use crate::platform::breakdown_callback;
 use base::config::keys;
 #[cfg(not(debug_assertions))]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use base::platform::register_breakdown_handler;
 use hbb_common::{config, log};
 #[cfg(windows)]
@@ -41,7 +41,7 @@ fn finish_macos_update(result: hbb_common::ResultType<()>) -> Option<CoreMainAct
 /// [Note]
 /// If it returns [`None`], then the process will terminate, and flutter gui will not be started.
 /// If it returns [`Some`], the action determines whether to start the UI or report failure.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub fn core_main() -> Option<CoreMainAction> {
     if !crate::common::global_init() {
         return None;
@@ -110,7 +110,7 @@ pub fn core_main() -> Option<CoreMainAction> {
         }
     }
     #[cfg(not(debug_assertions))]
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     register_breakdown_handler(breakdown_callback);
     #[cfg(target_os = "linux")]
     #[cfg(feature = "flutter")]
@@ -702,7 +702,7 @@ pub fn core_main() -> Option<CoreMainAction> {
             // meanwhile, return true to call flutter window to show control panel
             crate::ui_interface::start_option_status_sync();
         } else if args[0] == "--whiteboard" {
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
             {
                 crate::whiteboard::run();
             }
@@ -849,7 +849,7 @@ fn try_send_by_dbus(uni_links: String) -> Option<Vec<String>> {
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn is_root() -> bool {
     #[cfg(windows)]
     {

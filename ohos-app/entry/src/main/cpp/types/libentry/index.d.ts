@@ -10,6 +10,9 @@ export interface RustDeskNative {
   // ABI 版本，启动时与 ohos-build.json 里的期望值比对，避免 .a 与胶水层错配。
   abiVersion(): number;
 
+  // 核心版本号（"1.5.1"），「关于」页显示用。
+  version(): string | null;
+
   // 必须在其他调用之前执行一次。appDir 传 UIAbility 的 context.filesDir。
   init(appDir: string): number;
 
@@ -21,15 +24,37 @@ export interface RustDeskNative {
   sessionClose(): void;
   sessionRefresh(display: number): void;
 
+  // 提交登录密码（密码弹窗「确定」时调用）。username/osPassword 传空串即可。
+  // remember 非 0 表示记住密码。没有活跃会话时返回 -2。
+  sessionLogin(password: string, username: string, osPassword: string, remember: number): number;
+
+  // 回应「未加密连接」警告。accept 非 0 = 继续，0 = 取消断开。
+  // 缺了这一步上游会一直卡在等确认，表现为连上了但黑屏。
+  sessionContinueInsecure(accept: number): number;
+
   // 状态快照（JSON 字符串）。页面重建后用它恢复 UI。
   stateJson(): string | null;
 
   // 服务器配置（JSON 字符串，键为 custom-rendezvous-server / relay-server /
-  // api-server / key / effective-rendezvous-server）。没初始化时返回 null。
+  // api-server / key / effective-rendezvous-server，以及 view-style /
+  // image-quality / show-remote-cursor / disable-audio / force-always-relay；
+  // 另外还带 id 与 temporary-password 两项只读的本机身份）。
+  // 没初始化时返回 null。
   configJson(): string | null;
 
-  // 写服务器配置。json 是上面那些键的对象；空串表示删除该项。
+  // 写配置。json 是上面那些键的对象；空串表示删除该项。
   configSet(json: string): number;
+
+  // --- 本机身份 / 最近会话（首页用）---
+
+  // 刷新一次性密码。刷新后要重新 configJson() 才能拿到新值。
+  updateTempPassword(): number;
+  // 设置固定密码，传空串表示清除。返回 0 成功。
+  setPermanentPassword(pw: string): number;
+  // 最近连接过的对端，按最后连接时间倒序：[{"id":"...","ts":秒,"fav":bool}]。
+  peersJson(): string | null;
+  // 收藏列表整体写回（传完整 id 数组的 JSON）。返回 0 成功。
+  storeFav(jsonIds: string): number;
 
   // 鼠标：mask 见 ohos/include/rustdesk_ohos.h，坐标是远端画面坐标系。
   mouse(mask: number, x: number, y: number, alt: number, ctrl: number,
@@ -39,9 +64,55 @@ export interface RustDeskNative {
   key(name: string, down: number, press: number, alt: number, ctrl: number,
       shift: number, command: number): number;
 
+  // 软键盘文字：整段发过去比逐键干净（服务端按 seq 逐字注入，
+  // 不吃键位布局）。退格等控制键仍走 key()。
+  text(value: string): number;
+
+  // 代理设置：{"proxy","username","password"}。代理不在 options map 里，
+  // 存在 Config2.socks，所以单独一对接口。
+  proxyJson(): string | null;
+  proxySet(json: string): number;
+
+  // 读 / 写单个配置项的原始值（"Y" / "N" / 字符串）。key 必须在 UI 白名单内。
+  optionGet(key: string): string | null;
+  optionSet(key: string, value: string): number;
+
+  // 读 / 写单个**本地**配置项（LocalConfig）。打洞开关等走这条路。
+  localOptionGet(key: string): string | null;
+  localOptionSet(key: string, value: string): number;
+
+  // 当前生效 ID 服务器的连接状态：1=已连接、0=正在连接、-1=连接失败。
+  // 不阻塞，可放在 UI 定时刷新里。
+  serverStatus(): number;
+
   ctrlAltDel(): number;
   switchDisplay(index: number): number;
   sendChat(text: string): number;
+
+  // --- 会话操作（Android 底栏 ⋮「更多」菜单）---
+  // 全部是「发一条消息给 io_loop」，返回 0 只代表已入队，不等结果。
+
+  // 锁定远端屏幕。
+  lockScreen(): number;
+  // 重启远端设备。只有 Windows / Linux / macOS 对端支持。
+  restartRemote(): number;
+  // 把密码发到远端 OS 登录界面；activate 非 0 = 发完立刻回车。
+  inputOsPassword(pw: string, activate: number): number;
+  // 提权：direct 用于已是管理员会话；withLogon 用于 UAC 要凭据。
+  elevateDirect(): number;
+  elevateWithLogon(username: string, password: string): number;
+  // 会话录屏开关。start 非 0 开始，0 停止。
+  recordScreen(start: number): number;
+  // 当前是否在录屏；没有会话时返回 0。
+  isRecording(): number;
+  // 翻转会话级开关（"block-input" / "show-remote-cursor"…）。
+  toggleOption(name: string): number;
+  // 对端平台（"Windows" / "Linux" / "MacOS" / "Android"）；没会话时返回空串。
+  peerPlatform(): string | null;
+  // 按 USB HID usage 发键（Android 被控端的音量/电源）。只认：
+  // 0x007f 静音 / 0x0080 音量+ / 0x0081 音量- / 0x0066 电源。
+  // 必须成对调用：down=1 之后再 down=0。
+  hidKey(usbHid: number, down: number): number;
 
   // 重新读系统显示器列表。
   displaysSync(): number;

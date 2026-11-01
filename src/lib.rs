@@ -3,7 +3,7 @@ mod audio_resampler;
 mod keyboard;
 /// cbindgen:ignore
 pub mod platform;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub use platform::{
     clip_cursor, get_cursor, get_cursor_data, get_cursor_pos, get_focused_display,
     set_cursor_pos, start_os_service,
@@ -26,6 +26,7 @@ pub mod ipc;
 #[cfg(not(any(
     target_os = "android",
     target_os = "ios",
+    target_env = "ohos",
     feature = "flutter"
 )))]
 pub mod ui;
@@ -46,21 +47,21 @@ mod auth_2fa;
 mod trusted_devices;
 #[cfg(not(target_os = "ios"))]
 mod clipboard;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub mod core_main;
 mod custom_server;
 mod lang;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 mod port_forward;
 mod port_forward_mux;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 mod tray;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 mod whiteboard;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 mod updater;
 
 mod ui_cm_interface;
@@ -69,7 +70,10 @@ mod ui_session_interface;
 
 mod hbbs_http;
 
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+#[cfg(all(
+    any(target_os = "windows", target_os = "linux", target_os = "macos"),
+    not(target_env = "ohos")
+))]
 pub mod clipboard_file;
 
 pub mod privacy_mode;

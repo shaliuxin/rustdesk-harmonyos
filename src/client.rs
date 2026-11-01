@@ -2683,12 +2683,18 @@ impl VideoHandler {
     pub fn new(format: CodecFormat, _display: usize) -> Self {
         let luid = Self::get_adapter_luid();
         log::info!("new video handler for display #{_display}, format: {format:?}, luid: {luid:?}");
-        let rgba_format =
-            if cfg!(feature = "flutter") && (cfg!(windows) || cfg!(target_os = "linux")) {
-                ImageFormat::ABGR
-            } else {
-                ImageFormat::ARGB
-            };
+        // `ImageFormat` 命名的是 **libyuv 的 fourcc**，不是内存字节序，两者相反：
+        //   - `ARGB` → libyuv `I420ToARGB` → 内存里是 B,G,R,A
+        //   - `ABGR` → libyuv `I420ToABGR` → 内存里是 R,G,B,A
+        // 鸿蒙的 XComponent Surface 用 `PIXEL_FMT_RGBA_8888`（内存 R,G,B,A），
+        // 所以这里必须选 `ABGR`；选 `ARGB` 会红蓝互换（皮肤发蓝、红旗变蓝旗）。
+        let rgba_format = if cfg!(target_env = "ohos")
+            || (cfg!(feature = "flutter") && (cfg!(windows) || cfg!(target_os = "linux")))
+        {
+            ImageFormat::ABGR
+        } else {
+            ImageFormat::ARGB
+        };
         VideoHandler {
             decoder: Decoder::new(format, luid),
             rgb: ImageRgb::new(rgba_format, crate::get_dst_align_rgba()),
@@ -3088,6 +3094,37 @@ impl LoginConfigHandler {
         }
         config.options.insert(k, v);
         self.save_config(config);
+    }
+
+    /// Set a per-peer **toggle** (`show-remote-cursor` / `privacy-mode` …).
+    ///
+    /// Unlike [`Self::set_option`], this writes the named `PeerConfig` field
+    /// instead of an entry of the `options` map. The difference matters: these
+    /// toggles are `serde_field_bool!` fields (`config.show_remote_cursor.v`),
+    /// and [`Self::get_toggle_option`] reads the field directly, so a value put
+    /// into `options` is never read back — the setting appears saved but has no
+    /// effect. Same trap as `view_style` / `image_quality`, hence the same
+    /// "write the field, then store" shape as [`Self::save_view_style`].
+    ///
+    /// Returns `false` when `name` is not a known toggle, so callers can fall
+    /// back to [`Self::set_option`].
+    pub fn set_session_toggle(&mut self, name: &str, on: bool) -> bool {
+        let mut config = self.load_config();
+        match name {
+            "show-remote-cursor" => config.show_remote_cursor.v = on,
+            "follow-remote-cursor" => config.follow_remote_cursor.v = on,
+            "follow-remote-window" => config.follow_remote_window.v = on,
+            "show-quality-monitor" => config.show_quality_monitor.v = on,
+            "disable-audio" => config.disable_audio.v = on,
+            "disable-clipboard" => config.disable_clipboard.v = on,
+            "lock-after-session-end" => config.lock_after_session_end.v = on,
+            "privacy-mode" => config.privacy_mode.v = on,
+            "view-only" => config.view_only.v = on,
+            "show-my-cursor" => config.show_my_cursor.v = on,
+            _ => return false,
+        }
+        self.save_config(config);
+        true
     }
 
     //to-do: too many dup code below.

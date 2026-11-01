@@ -95,6 +95,13 @@ napi_value MakeUndefined(napi_env env) {
     return out;
 }
 
+// 从一个 C++ 字符串造 JS 字符串（不释放任何东西，与 TakeString 区分开）。
+napi_value MakeString(napi_env env, const char* s) {
+    napi_value out;
+    napi_create_string_utf8(env, s, NAPI_AUTO_LENGTH, &out);
+    return out;
+}
+
 // 把 Rust 返回的 char* 转成 JS 字符串并释放。
 // Rust 分配、C++ 释放 —— 与头文件里的约定一致（rustdesk_ohos_string_free）。
 napi_value TakeString(napi_env env, char* p) {
@@ -167,6 +174,10 @@ napi_value JsAbiVersion(napi_env env, napi_callback_info /*info*/) {
     return MakeInt(env, static_cast<int32_t>(rustdesk_ohos_abi_version()));
 }
 
+napi_value JsVersion(napi_env env, napi_callback_info /*info*/) {
+    return TakeString(env, rustdesk_ohos_version());
+}
+
 napi_value JsInit(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1] = {nullptr};
@@ -201,6 +212,33 @@ napi_value JsSessionClose(napi_env env, napi_callback_info /*info*/) {
     return MakeUndefined(env);
 }
 
+// 提交登录密码：username / osPassword 可传空串。
+napi_value JsSessionLogin(napi_env env, napi_callback_info info) {
+    size_t argc = 4;
+    napi_value args[4] = {nullptr, nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    std::string username;
+    std::string os_password;
+    std::string password;
+    int32_t remember = 0;
+    if (argc < 1 || !GetStringArg(env, args[0], password)) return MakeInt(env, -1);
+    if (argc >= 2 && args[1] != nullptr) GetStringArg(env, args[1], username);
+    if (argc >= 3 && args[2] != nullptr) GetStringArg(env, args[2], os_password);
+    if (argc >= 4 && args[3] != nullptr) GetIntArg(env, args[3], remember);
+    return MakeInt(env, rustdesk_ohos_session_login(
+                            username.c_str(), os_password.c_str(), password.c_str(), remember));
+}
+
+napi_value JsSessionContinueInsecure(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t accept = 0;
+    if (argc >= 1) GetIntArg(env, args[0], accept);
+    return MakeInt(env, rustdesk_ohos_session_continue_insecure(accept));
+}
+
 napi_value JsSessionRefresh(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1] = {nullptr};
@@ -231,6 +269,35 @@ napi_value JsConfigSet(napi_env env, napi_callback_info info) {
     return MakeInt(env, rustdesk_ohos_config_set(json.c_str()));
 }
 
+// --- 本机身份 / 最近会话（首页用）-------------------------------------------
+
+napi_value JsUpdateTempPassword(napi_env env, napi_callback_info /*info*/) {
+    rustdesk_ohos_update_temporary_password();
+    return MakeInt(env, 0);
+}
+
+napi_value JsSetPermanentPassword(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string pw;
+    if (argc < 1 || !GetStringArg(env, args[0], pw)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_set_permanent_password(pw.c_str()));
+}
+
+napi_value JsPeersJson(napi_env env, napi_callback_info /*info*/) {
+    return TakeString(env, rustdesk_ohos_peers_json());
+}
+
+napi_value JsStoreFav(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string json;
+    if (argc < 1 || !GetStringArg(env, args[0], json)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_store_fav(json.c_str()));
+}
+
 napi_value JsMouse(napi_env env, napi_callback_info info) {
     // 7 个参数：mask, x, y, alt, ctrl, shift, command
     size_t argc = 7;
@@ -243,6 +310,15 @@ napi_value JsMouse(napi_env env, napi_callback_info info) {
     }
     // 缺参数时按 0 处理：调用方少传修饰键是常见情况，不该报错。
     return MakeInt(env, rustdesk_ohos_mouse(v[0], v[1], v[2], v[3], v[4], v[5], v[6]));
+}
+
+napi_value JsText(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string text;
+    if (argc < 1 || !GetStringArg(env, args[0], text)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_text(text.c_str()));
 }
 
 napi_value JsKey(napi_env env, napi_callback_info info) {
@@ -273,6 +349,69 @@ napi_value JsSwitchDisplay(napi_env env, napi_callback_info info) {
     return MakeInt(env, rustdesk_ohos_switch_display(index));
 }
 
+napi_value JsLocalOptionGet(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string key;
+    if (argc < 1 || !GetStringArg(env, args[0], key)) {
+        return MakeString(env, "");
+    }
+    return TakeString(env, rustdesk_ohos_local_option_get(key.c_str()));
+}
+
+napi_value JsLocalOptionSet(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string key;
+    std::string value;
+    if (argc < 1 || !GetStringArg(env, args[0], key)) return MakeInt(env, -1);
+    if (argc >= 2) GetStringArg(env, args[1], value);
+    return MakeInt(env, rustdesk_ohos_local_option_set(key.c_str(), value.c_str()));
+}
+
+napi_value JsProxyJson(napi_env env, napi_callback_info /*info*/) {
+    return TakeString(env, rustdesk_ohos_proxy_json());
+}
+
+napi_value JsProxySet(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string s;
+    if (argc < 1 || !GetStringArg(env, args[0], s)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_proxy_set(s.c_str()));
+}
+
+napi_value JsOptionGet(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string key;
+    if (argc < 1 || !GetStringArg(env, args[0], key)) {
+        return MakeString(env, "");
+    }
+    return TakeString(env, rustdesk_ohos_option_get(key.c_str()));
+}
+
+napi_value JsOptionSet(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string key;
+    std::string value;
+    if (argc < 1 || !GetStringArg(env, args[0], key)) return MakeInt(env, -1);
+    if (argc >= 2) GetStringArg(env, args[1], value);
+    return MakeInt(env, rustdesk_ohos_option_set(key.c_str(), value.c_str()));
+}
+
+// 返回当前生效 ID 服务器的连接状态：1=已连接、0=正在连接、-1=连接失败。
+// 不阻塞（结果由后台看门狗线程维护），所以可以放在 UI 的定时刷新里。
+napi_value JsServerStatus(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_server_status());
+}
+
 napi_value JsSendChat(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1] = {nullptr};
@@ -280,6 +419,84 @@ napi_value JsSendChat(napi_env env, napi_callback_info info) {
     std::string text;
     if (argc < 1 || !GetStringArg(env, args[0], text)) return MakeInt(env, -1);
     return MakeInt(env, rustdesk_ohos_send_chat(text.c_str()));
+}
+
+// --- 会话操作（Android 底栏 ⋮「更多」菜单）---------------------------------
+
+napi_value JsLockScreen(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_lock_screen());
+}
+
+napi_value JsRestartRemote(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_restart_remote());
+}
+
+// args: (pw, activate)
+napi_value JsInputOsPassword(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string pw;
+    int32_t activate = 1;
+    if (argc < 1 || !GetStringArg(env, args[0], pw)) return MakeInt(env, -1);
+    if (argc >= 2 && args[1] != nullptr) GetIntArg(env, args[1], activate);
+    return MakeInt(env, rustdesk_ohos_input_os_password(pw.c_str(), activate));
+}
+
+napi_value JsElevateDirect(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_elevate_direct());
+}
+
+// args: (username, password)
+napi_value JsElevateWithLogon(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string username;
+    std::string password;
+    if (argc >= 1 && args[0] != nullptr) GetStringArg(env, args[0], username);
+    if (argc >= 2 && args[1] != nullptr) GetStringArg(env, args[1], password);
+    return MakeInt(env, rustdesk_ohos_elevate_with_logon(username.c_str(), password.c_str()));
+}
+
+// args: (start)
+napi_value JsRecordScreen(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t start = 0;
+    if (argc >= 1) GetIntArg(env, args[0], start);
+    return MakeInt(env, rustdesk_ohos_record_screen(start));
+}
+
+napi_value JsIsRecording(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_is_recording());
+}
+
+// args: (name)
+napi_value JsToggleOption(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string name;
+    if (argc < 1 || !GetStringArg(env, args[0], name)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_toggle_option(name.c_str()));
+}
+
+napi_value JsPeerPlatform(napi_env env, napi_callback_info /*info*/) {
+    return TakeString(env, rustdesk_ohos_peer_platform());
+}
+
+// args: (usbHid, down)
+napi_value JsHidKey(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t usb_hid = 0;
+    int32_t down = 0;
+    if (argc >= 1) GetIntArg(env, args[0], usb_hid);
+    if (argc >= 2) GetIntArg(env, args[1], down);
+    return MakeInt(env, rustdesk_ohos_hid_key(usb_hid, down));
 }
 
 napi_value JsDisplaysSync(napi_env env, napi_callback_info /*info*/) {
@@ -367,19 +584,44 @@ napi_value Init(napi_env env, napi_value exports) {
 
     napi_property_descriptor desc[] = {
         {"abiVersion", nullptr, JsAbiVersion, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"version", nullptr, JsVersion, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"init", nullptr, JsInit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"lastError", nullptr, JsLastError, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sessionStart", nullptr, JsSessionStart, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sessionClose", nullptr, JsSessionClose, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"sessionLogin", nullptr, JsSessionLogin, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"sessionContinueInsecure", nullptr, JsSessionContinueInsecure, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sessionRefresh", nullptr, JsSessionRefresh, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stateJson", nullptr, JsStateJson, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"configJson", nullptr, JsConfigJson, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"configSet", nullptr, JsConfigSet, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"updateTempPassword", nullptr, JsUpdateTempPassword, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setPermanentPassword", nullptr, JsSetPermanentPassword, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"peersJson", nullptr, JsPeersJson, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"storeFav", nullptr, JsStoreFav, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"mouse", nullptr, JsMouse, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"key", nullptr, JsKey, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"text", nullptr, JsText, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"ctrlAltDel", nullptr, JsCtrlAltDel, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"switchDisplay", nullptr, JsSwitchDisplay, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"localOptionGet", nullptr, JsLocalOptionGet, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"localOptionSet", nullptr, JsLocalOptionSet, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"proxyJson", nullptr, JsProxyJson, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"proxySet", nullptr, JsProxySet, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"optionGet", nullptr, JsOptionGet, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"optionSet", nullptr, JsOptionSet, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"serverStatus", nullptr, JsServerStatus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sendChat", nullptr, JsSendChat, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"lockScreen", nullptr, JsLockScreen, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"restartRemote", nullptr, JsRestartRemote, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"inputOsPassword", nullptr, JsInputOsPassword, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"elevateDirect", nullptr, JsElevateDirect, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"elevateWithLogon", nullptr, JsElevateWithLogon, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"recordScreen", nullptr, JsRecordScreen, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"isRecording", nullptr, JsIsRecording, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"toggleOption", nullptr, JsToggleOption, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"peerPlatform", nullptr, JsPeerPlatform, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hidKey", nullptr, JsHidKey, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"displaysSync", nullptr, JsDisplaysSync, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"logProbe", nullptr, JsLogProbe, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setRenderActive", nullptr, JsSetRenderActive, nullptr, nullptr, nullptr, napi_default, nullptr},

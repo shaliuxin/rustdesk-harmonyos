@@ -345,7 +345,7 @@ pub fn is_pro() -> bool {
 // If the device clock is outside the server's accepted window, the server
 // returns its current Unix time and this task re-signs and retries once.
 #[cfg(feature = "flutter")]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub fn register_switch_grant(switch_uuid: String) {
     tokio::spawn(async move {
         let api_server = crate::ui_interface::get_api_server();
@@ -413,7 +413,7 @@ pub fn register_switch_grant(switch_uuid: String) {
 }
 
 #[cfg(feature = "flutter")]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn switch_code_verifier(switch_code: &str) -> String {
     use hbb_common::sodiumoxide::crypto::hash::sha256;
 
@@ -425,7 +425,7 @@ fn switch_code_verifier(switch_code: &str) -> String {
 }
 
 #[cfg(feature = "flutter")]
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn switch_grant_signed_msg(id: &str, switch_code_verifier: &str, timestamp: &str) -> Vec<u8> {
     let mut msg =
         Vec::with_capacity(13 + id.len() + 1 + switch_code_verifier.len() + 1 + timestamp.len());
@@ -441,7 +441,7 @@ fn switch_grant_signed_msg(id: &str, switch_code_verifier: &str, timestamp: &str
 #[cfg(all(
     test,
     feature = "flutter",
-    not(any(target_os = "android", target_os = "ios"))
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos"))
 ))]
 mod tests {
     use super::{switch_code_verifier, switch_grant_signed_msg};

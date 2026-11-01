@@ -65,6 +65,8 @@ void RenderLoop() {
     // buffer 的实际几何尺寸（= 最近一帧的尺寸），与 Surface 尺寸无关。
     int32_t buffer_w = 0;
     int32_t buffer_h = 0;
+    // geometry 与帧尺寸不一致时的连续重试计数（见下面的自愈分支）。
+    int32_t drift_retry = 0;
 
     while (g_running.load(std::memory_order_acquire)) {
         if (!g_active.load(std::memory_order_acquire)) {
@@ -85,11 +87,22 @@ void RenderLoop() {
             continue;
         }
 
-        // Surface 尺寸变化（旋转 / 分屏 / 折叠屏展开）时记下来。
-        // 但**不**用它设置 buffer geometry —— 见下面 acquire 之后的说明。
+        // Surface 尺寸变化（旋转 / 分屏 / 折叠屏展开 / 2in1 拉窗口）时记下来。
+        //
+        // **不**用它设置 buffer geometry（buffer 恒等于帧尺寸，见下），但必须
+        // 让下一帧重新钉一次 geometry：窗口尺寸一变，框架会把 native window 的
+        // 默认 buffer 尺寸重置成新窗口尺寸，`request_buffer` 就会给出窗口尺寸的
+        // 缓冲。此时我们仍然按帧尺寸拷，只会拷进左上角一部分（画面被裁、比例
+        // 错乱），或者干脆对不上号。之前这里只记录、不重设，就是「拉窗口画面
+        // 不跟随」的直接原因。
         if (want_w != configured_w || want_h != configured_h) {
+            OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                         "surface resized %{public}dx%{public}d -> %{public}dx%{public}d",
+                         configured_w, configured_h, want_w, want_h);
             configured_w = want_w;
             configured_h = want_h;
+            buffer_w = -1;
+            buffer_h = -1;
         }
 
         int32_t frame_w = 0, frame_h = 0;
@@ -141,6 +154,50 @@ void RenderLoop() {
             rustdesk_ohos_frame_release(0);
             std::this_thread::sleep_for(std::chrono::milliseconds(kIdleSleepMs));
             continue;
+        }
+
+        // 只在第一帧打印一次：像素格式与 stride 是排查「颜色不对」的第一现场。
+        // Rust 侧解码输出固定为 `ImageFormat::ABGR`（libyuv 的 ABGR = 内存
+        // R,G,B,A），对应这里的 `PIXEL_FMT_RGBA_8888`（=12）。若这里是
+        // `PIXEL_FMT_BGRA_8888`（=20），红蓝就会互换。
+        static bool format_logged = false;
+        if (!format_logged) {
+            format_logged = true;
+            OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                         "buffer fmt=%{public}d stride=%{public}d size=%{public}dx%{public}d "
+                         "frame=%{public}dx%{public}d",
+                         handle->format, handle->stride, handle->width, handle->height,
+                         frame_w, frame_h);
+            if (handle->format != 12) {
+                OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                             "unexpected buffer format %{public}d (want 12 = RGBA_8888), "
+                             "colors will be wrong",
+                             handle->format);
+            }
+        }
+
+        // 自愈：request 出来的缓冲尺寸和帧尺寸不一致，说明 window 的默认
+        // buffer 尺寸被框架改回去了（窗口 resize / 旋转最常见）。这一帧先扔，
+        // 下一轮会重新 SET_BUFFER_GEOMETRY 把它钉回帧尺寸。
+        //
+        // 加计数上限：万一 SET_BUFFER_GEOMETRY 不生效（厂商实现差异），无上限
+        // 重试会把每一帧都扔掉 —— 画面直接冻住，比裁切更难排查。超过上限就
+        // 老老实实按实际缓冲尺寸裁着画。
+        if (handle->width != frame_w || handle->height != frame_h) {
+            if (drift_retry < 30) {
+                ++drift_retry;
+                OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                             "buffer geometry drifted %{public}dx%{public}d "
+                             "(want %{public}dx%{public}d), re-apply #%{public}d",
+                             handle->width, handle->height, frame_w, frame_h, drift_retry);
+                buffer_w = -1;
+                buffer_h = -1;
+                OH_NativeWindow_NativeWindowAbortBuffer(window, buffer);
+                rustdesk_ohos_frame_release(0);
+                continue;
+            }
+        } else {
+            drift_retry = 0;
         }
 
         void* mapped = mmap(handle->virAddr, handle->size, PROT_READ | PROT_WRITE,

@@ -408,10 +408,10 @@ pub async fn run_channel<R, W>(
     log::debug!("port forward channel {} ended: {:?} / {:?}", id, first, second);
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub use tunnel::{Claim, Tunnel};
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 mod tunnel {
     use super::*;
     use crate::client::Interface;
@@ -934,7 +934,7 @@ mod tests {
         });
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     mod tunnel {
         use super::*;
         use crate::port_forward_mux::{tunnel::TunnelHandle, Claim, Tunnel};

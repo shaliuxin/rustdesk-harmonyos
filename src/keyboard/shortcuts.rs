@@ -440,7 +440,7 @@ pub(super) fn release_modifier_on_leave(key: rdev::Key) -> bool {
 
 #[cfg(feature = "flutter")]
 pub fn enter_view_only(session_id: &hbb_common::SessionID) {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     if super::IS_RDEV_ENABLED.load(std::sync::atomic::Ordering::SeqCst) {
         return;
     }
@@ -754,7 +754,7 @@ mod tests {
             event.position_code = rdev::linux_keycode_from_key(k).unwrap_or_default();
             event.platform_code = event.position_code;
         }
-        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
         {
             event.usb_hid = rdev::usb_hid_keycode_from_key(k).unwrap_or_default();
         }
@@ -1266,7 +1266,7 @@ mod tests {
         for (mode, alt) in ["map", "translate", "legacy"].into_iter()
             .flat_map(|mode| [Key::Alt, Key::AltGr].map(|alt| (mode, alt)))
         {
-            #[cfg(any(target_os = "android", target_os = "ios"))]
+            #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
             if mode == "legacy" { continue; } // Mobile does not encode Legacy events.
             #[cfg(target_os = "macos")]
             if mode == "translate" && alt == Key::AltGr { continue; } // Right Option is filtered.
@@ -1415,7 +1415,7 @@ mod tests {
         assert_eq!(sent, vec![(rdev::Key::KeyC, true)]);
     }
 
-    #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
+    #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios", target_env = "ohos"))))]
     #[test]
     fn view_only_preserves_rdev_shortcut_keys() {
         use rdev::Key;
@@ -1437,7 +1437,7 @@ mod tests {
         assert!(fired, "rdev still receives the held shortcut key's release");
     }
 
-    #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
+    #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios", target_env = "ohos"))))]
     #[test]
     fn view_only_clears_flutter_shortcut_keys_and_modifiers() {
         use rdev::Key;

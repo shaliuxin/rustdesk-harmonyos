@@ -1,6 +1,27 @@
 {
   "app": {
-    "signingConfigs": [],
+    // 自签名配置：三级证书链由 SDK 自带的 OpenHarmony CA 签发，
+    // profile 是本机自签的 debug profile（绑定了当前模拟器 UDID）。
+    //
+    // 密码字段是 DevEco 的加密格式（十六进制串），明文由
+    // `~/.ohos/config/material/` 里的密钥解开 —— hvigor 不接受明文密码，
+    // 直接写 "123456" 会报 INVALID_DATA。换机器/换用户目录时这两个密码串
+    // 必须重新生成（DevEco 里重新点一次自动签名即可）。
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "OpenHarmony",
+        "material": {
+          "certpath": "C:\\Users\\mingh\\.ohos\\config\\rustdesk_ohos_debug.cer",
+          "storePassword": "0000001bbd1d58ea72c1f77c36303fc31a7dfe6a77bc3e83d5f67c369e012a47868bb15e6e7abe5648f46e",
+          "keyAlias": "rustdesk-debug",
+          "keyPassword": "0000001bbd1d58ea72c1f77c36303fc31a7dfe6a77bc3e83d5f67c369e012a47868bb15e6e7abe5648f46e",
+          "profile": "C:\\Users\\mingh\\.ohos\\config\\rustdesk_ohos_debug.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\mingh\\.ohos\\config\\rustdesk_ohos_debug.p12"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
@@ -14,7 +35,8 @@
             "caseSensitiveCheck": true,
             "useNormalizedOHMUrl": true
           }
-        }
+        },
+        "targetSdkVersion": "26.0.0"
       }
     ],
     "buildModeSet": [

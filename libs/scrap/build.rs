@@ -4,7 +4,7 @@ use std::{
     println,
 };
 
-#[cfg(all(target_os = "linux", feature = "linux-pkg-config"))]
+#[cfg(feature = "linux-pkg-config")]
 fn link_pkg_config(name: &str) -> Vec<PathBuf> {
     // sometimes an override is needed
     let pc_name = match name {
@@ -18,7 +18,7 @@ fn link_pkg_config(name: &str) -> Vec<PathBuf> {
 
     lib.include_paths
 }
-#[cfg(not(all(target_os = "linux", feature = "linux-pkg-config")))]
+#[cfg(not(feature = "linux-pkg-config"))]
 fn link_pkg_config(_name: &str) -> Vec<PathBuf> {
     unimplemented!()
 }
@@ -125,7 +125,11 @@ fn link_homebrew_m1(name: &str) -> PathBuf {
 fn find_package(name: &str) -> Vec<PathBuf> {
     let no_pkg_config_var_name = format!("NO_PKG_CONFIG_{name}");
     println!("cargo:rerun-if-env-changed={no_pkg_config_var_name}");
-    if cfg!(all(target_os = "linux", feature = "linux-pkg-config"))
+    // build script 由宿主 rustc 编译，`cfg!(target_os = "linux")` 判断的是宿主而不是目标，
+    // 交叉编译时必然走错分支。目标平台信息只能从 cargo 注入的环境变量读。
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if cfg!(feature = "linux-pkg-config")
+        && target_os == "linux"
         && std::env::var(no_pkg_config_var_name).as_deref() != Ok("1")
     {
         link_pkg_config(name)
@@ -250,17 +254,22 @@ fn main() {
     gen_vcpkg_package("libyuv", "yuv_ffi.h", "yuv_ffi.rs", ".*");
     // ffmpeg();
 
+    // 同样地，原来的 `cfg!(windows)` / `cfg!(target_os = "macos")` / `cfg!(unix)`
+    // 在交叉编译时判断的都是宿主，故统一改为读取目标平台环境变量。
     if target_os == "ios" {
         // nothing
     } else if target_os == "android" {
         println!("cargo:rustc-cfg=android");
-    } else if cfg!(windows) {
+    } else if target_os == "windows" {
         // The first choice is Windows because DXGI is amazing.
         println!("cargo:rustc-cfg=dxgi");
-    } else if cfg!(target_os = "macos") {
+    } else if target_os == "macos" {
         // Quartz is second because macOS is the (annoying) exception.
         println!("cargo:rustc-cfg=quartz");
-    } else if cfg!(unix) {
+    } else if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("ohos") {
+        // OpenHarmony 既没有 DXGI/Quartz，也没有 X11：采集由 ArkTS 侧的
+        // @ohos.screenCapture 完成后经 FFI 送入 Rust，此处不发出任何后端 cfg。
+    } else {
         // On UNIX we pray that X11 (with XCB) is available.
         println!("cargo:rustc-cfg=x11");
     }

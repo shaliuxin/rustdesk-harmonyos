@@ -37,6 +37,9 @@ extern "C" {
 // ABI 版本。ArkTS/C++ 启动时校验，避免 .a 与胶水层版本错配。
 uint32_t rustdesk_ohos_abi_version(void);
 
+// 核心版本号（"1.5.1"）。「关于」页显示用。调用方负责 rustdesk_ohos_string_free。
+char *rustdesk_ohos_version(void);
+
 // 进程内初始化，必须最先调用且只调一次。
 // app_dir: 应用沙箱内的可写目录（ArkTS 的 context.filesDir）。
 // 返回 0 成功。
@@ -53,12 +56,28 @@ void rustdesk_ohos_string_free(char *p);
 // {"custom-rendezvous-server":"","relay-server":"","api-server":"","key":"",
 //  "effective-rendezvous-server":"rs-ny.rustdesk.com:21116"}
 // effective-* 是**实际生效**的地址（可能来自编译期内置的定制服务器）。
+// 另外还带 "id"（本机 ID）和 "temporary-password"（一次性密码），首页卡片用。
 char *rustdesk_ohos_config_json(void);
 
 // 写入服务器配置。json 是对象，只认 custom-rendezvous-server / relay-server /
 // api-server / key 四个键，其余忽略；值为空串表示删除该项（回到默认）。
 // 返回 0 成功。
 int32_t rustdesk_ohos_config_set(const char *json);
+
+// --- 本机身份 / 最近会话（首页用）------------------------------------------
+
+// 刷新一次性密码（首页卡片上的「刷新」）。
+void rustdesk_ohos_update_temporary_password(void);
+
+// 设置固定密码。传空串表示清除。返回 0 成功。
+int32_t rustdesk_ohos_set_permanent_password(const char *pw);
+
+// 最近连接过的对端，按最后连接时间倒序。调用方负责 rustdesk_ohos_string_free。
+// 形如 [{"id":"123456789","ts":1730000000,"fav":false}, ...]，ts 是 Unix 秒。
+char *rustdesk_ohos_peers_json(void);
+
+// 收藏列表整体写回。json 是字符串数组，例如 ["123456789"]。返回 0 成功。
+int32_t rustdesk_ohos_store_fav(const char *json_ids);
 
 // --- 主控会话 -------------------------------------------------------------
 
@@ -70,6 +89,16 @@ int32_t rustdesk_ohos_session_start(const char *peer_id, const char *password,
                                     int32_t force_relay);
 
 void rustdesk_ohos_session_close(void);
+
+// 提交登录凭据（密码弹窗的「确定」走这里）。username / os_password 通常传空串。
+// remember 非 0 表示记住密码（存进该 peer 的 PeerConfig）。返回 0 成功；
+// 没有活跃会话时返回 -2。
+int32_t rustdesk_ohos_session_login(const char *username, const char *os_password,
+                                    const char *password, int32_t remember);
+
+// 回应「未加密连接」警告。accept 非 0 = 继续，0 = 取消。
+// 上游会在建链后同步等待这个回话，不回就一直黑屏。没有活跃会话时返回 -2。
+int32_t rustdesk_ohos_session_continue_insecure(int32_t accept);
 
 // 请求关键帧（回到前台 / 旋转屏幕后调用）。
 void rustdesk_ohos_session_refresh(int32_t display);
@@ -111,7 +140,69 @@ int32_t rustdesk_ohos_key(const char *name, int32_t down, int32_t press,
 
 int32_t rustdesk_ohos_ctrl_alt_del(void);
 
+// 输入一段文字（软键盘）。走 KeyEvent.seq 通道，逐字符注入，
+// 不受两端键位布局影响，中文/符号也能用；空串直接返回 0。
+int32_t rustdesk_ohos_text(const char *text);
+
 int32_t rustdesk_ohos_switch_display(int32_t index);
+
+// 代理设置（JSON），形如 {"proxy":"","username":"","password":""}。
+// 代理不在 Config 的 options map 里，而是 Config2 的 socks 字段，
+// 所以单独给一对读写接口。返回的 char* 由调用方释放。
+char *rustdesk_ohos_proxy_json(void);
+
+int32_t rustdesk_ohos_proxy_set(const char *json);
+
+// 读 / 写单个配置项的原始值。key 必须在 UI 白名单内，否则返回空串 / 错误码。
+// 返回的 char* 由调用方用 rustdesk_ohos_string_free 释放。
+char *rustdesk_ohos_option_get(const char *key);
+
+int32_t rustdesk_ohos_option_set(const char *key, const char *value);
+
+// 读 / 写单个**本地**配置项（LocalConfig）。打洞开关等走这条路。
+char *rustdesk_ohos_local_option_get(const char *key);
+
+int32_t rustdesk_ohos_local_option_set(const char *key, const char *value);
+
+// 当前生效 ID 服务器的连接状态：1=已连接（绿）、0=正在连接（黄）、-1=连接失败（红）。
+// 由进程内一条后台看门狗线程持续探测并更新，本函数不阻塞，可随便从 UI 线程调。
+int32_t rustdesk_ohos_server_status(void);
+
+// --- 会话操作（Android 底栏 ⋮「更多」菜单）---------------------------------
+//
+// 这一组全是「发一条消息给 io_loop」，不等待结果，返回 0 只代表已入队。
+
+// 锁定远端屏幕。
+int32_t rustdesk_ohos_lock_screen(void);
+
+// 重启远端设备。只有 Windows / Linux / macOS 对端支持，调用方先自行判断。
+int32_t rustdesk_ohos_restart_remote(void);
+
+// 把密码发到远端 OS 登录界面。activate 非 0 = 发完立刻回车。
+int32_t rustdesk_ohos_input_os_password(const char *pw, int32_t activate);
+
+// 请求提权：direct 用于已是管理员会话，with_logon 用于 UAC 要凭据。
+int32_t rustdesk_ohos_elevate_direct(void);
+int32_t rustdesk_ohos_elevate_with_logon(const char *username,
+                                         const char *password);
+
+// 会话录屏开关。start 非 0 开始，0 停止。会话不存在时 is_recording 返回 0。
+int32_t rustdesk_ohos_record_screen(int32_t start);
+int32_t rustdesk_ohos_is_recording(void);
+
+// 翻转一个会话级开关（"block-input"、"show-remote-cursor"…）。
+// 名字必须与上游 toggle_option 认的字面量一致，否则对端不认。
+int32_t rustdesk_ohos_toggle_option(const char *name);
+
+// 对端平台（"Windows" / "Linux" / "MacOS" / "Android"）。会话不存在返回空串。
+// 菜单项可用性判断靠它。调用方负责 rustdesk_ohos_string_free。
+char *rustdesk_ohos_peer_platform(void);
+
+// 按 USB HID usage 发一个键（Android 被控端的音量键 / 电源键）。
+// 只认这四个 usage，别的会被静默丢弃：
+//   0x007f 静音 / 0x0080 音量+ / 0x0081 音量- / 0x0066 电源
+// 必须成对调用：down=1 之后再 down=0，否则对端会一直「按住」。
+int32_t rustdesk_ohos_hid_key(int32_t usb_hid, int32_t down);
 
 int32_t rustdesk_ohos_send_chat(const char *text);
 

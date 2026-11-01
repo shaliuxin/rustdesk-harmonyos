@@ -4,7 +4,11 @@ use hbb_common::{bail, log, ResultType};
 use std::{ffi::c_void, slice};
 
 cfg_if! {
-    if #[cfg(quartz)] {
+    if #[cfg(target_env = "ohos")] {
+        // OpenHarmony: 采集由 ArkTS 侧完成，Rust 侧只持有帧队列（见 ohos.rs）。
+        mod ohos;
+        pub use self::ohos::*;
+    } else if #[cfg(quartz)] {
         mod quartz;
         pub use self::quartz::*;
     } else if #[cfg(x11)] {

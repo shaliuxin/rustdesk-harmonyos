@@ -1,4 +1,4 @@
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use crate::{
     keyboard::input_source::{change_input_source, get_cur_session_input_source},
     trusted_devices::authority,
@@ -75,11 +75,11 @@ fn initialize(app_dir: &str, custom_client_config: &str) {
         init_from_env(Env::default().filter_or(DEFAULT_FILTER_ENV, "debug"));
         crate::common::test_nat_type();
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let _ = crate::common::global_init();
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         // core_main's init_log does not work for flutter since it is only applied to its load_library in main.c
         hbb_common::init_log(false, "flutter_ffi");
@@ -306,7 +306,7 @@ pub fn session_close(session_id: SessionID) {
         crate::keyboard::shortcuts::clear_session_state(&session_id);
         // `release_remote_keys` is not required for mobile platforms in common cases.
         // But we still call it to make the code more stable.
-        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
         crate::keyboard::release_remote_keys("map");
         session.close_event_stream(session_id);
         session.close();
@@ -659,7 +659,7 @@ pub fn session_handle_flutter_raw_key_event(
 // As Rust is multi-threaded, enter() can be called before leave().
 // The Rust-side grab ownership state filters stale transitions.
 pub fn session_enter_or_leave(_session_id: SessionID, _enter: bool) -> SyncReturn<()> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     if let Some(session) = sessions::get_session_by_session_id(&_session_id) {
         let keyboard_mode = session.get_keyboard_mode();
         // Use the full per-window UUID (not lc.session_id which is per-connection)
@@ -694,14 +694,14 @@ pub fn session_input_key(
     command: bool,
 ) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
-        // #[cfg(any(target_os = "android", target_os = "ios"))]
+        // #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
         session.input_key(&name, down, press, alt, ctrl, shift, command);
     }
 }
 
 pub fn session_input_string(session_id: SessionID, value: String) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
-        // #[cfg(any(target_os = "android", target_os = "ios"))]
+        // #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
         session.input_string(&value);
     }
 }
@@ -985,9 +985,9 @@ pub fn session_send_selected_session_id(session_id: SessionID, sid: String) {
 }
 
 pub fn main_get_sound_inputs() -> Vec<String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     return get_sound_inputs();
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     vec![String::from("")]
 }
 
@@ -1078,7 +1078,7 @@ pub fn main_set_option(key: String, value: String) -> hbb_common::anyhow::Result
         set_option(key, value.clone());
         #[cfg(target_os = "android")]
         crate::rendezvous_mediator::RendezvousMediator::restart();
-        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
         crate::common::test_rendezvous_server();
     } else {
         set_option(key, value.clone());
@@ -1178,11 +1178,11 @@ pub fn main_get_lan_peers() -> String {
 }
 
 pub fn main_get_connect_status() -> String {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         serde_json::to_string(&get_connect_status()).unwrap_or("".to_string())
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let mut state = hbb_common::config::get_online_state();
         if state > 0 {
@@ -1193,7 +1193,7 @@ pub fn main_get_connect_status() -> String {
 }
 
 pub fn main_check_connect_status() {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     start_option_status_sync(); // avoid multi calls
 }
 
@@ -1334,15 +1334,15 @@ pub fn main_handle_wayland_screencast_restore_token(_key: String, _value: String
 }
 
 pub fn main_get_input_source() -> SyncReturn<String> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     let input_source = get_cur_session_input_source();
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     let input_source = "".to_owned();
     SyncReturn(input_source)
 }
 
 pub fn main_set_input_source(session_id: SessionID, value: String) {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         change_input_source(session_id, value);
         if let Some(session) = sessions::get_session_by_session_id(&session_id) {
@@ -1361,11 +1361,11 @@ pub fn main_set_input_source(session_id: SessionID, value: String) {
 /// - Windows/macOS/Linux: attempts to move the cursor to (x, y)
 /// - Android/iOS: no-op, always returns `false`
 pub fn main_set_cursor_position(x: i32, y: i32) -> SyncReturn<bool> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         SyncReturn(crate::set_cursor_pos(x, y))
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let _ = (x, y);
         SyncReturn(false)
@@ -1395,7 +1395,7 @@ pub fn main_clip_cursor(
     bottom: i32,
     enable: bool,
 ) -> SyncReturn<bool> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         let rect = if enable {
             Some((left, top, right, bottom))
@@ -1404,7 +1404,7 @@ pub fn main_clip_cursor(
         };
         SyncReturn(crate::clip_cursor(rect))
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let _ = (left, top, right, bottom, enable);
         SyncReturn(false)
@@ -1476,7 +1476,7 @@ pub fn main_peer_exists(id: String) -> bool {
 // would read the wrong place. Elsewhere the peer path never consults it, so an unset `APP_DIR`
 // must not stop the peers from loading.
 fn peer_config_path_ready() -> bool {
-    if cfg!(any(target_os = "android", target_os = "ios")) {
+    if cfg!(any(target_os = "android", target_os = "ios", target_env = "ohos")) {
         !config::APP_DIR.read().unwrap().is_empty()
     } else {
         true
@@ -1794,7 +1794,7 @@ pub fn cm_close_voice_call(id: i32) {
 }
 
 pub fn set_voice_call_input_device(_is_cm: bool, _device: String) {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     if _is_cm {
         let _ = crate::ipc::set_config("voice-call-input", _device);
     } else {
@@ -1803,7 +1803,7 @@ pub fn set_voice_call_input_device(_is_cm: bool, _device: String) {
 }
 
 pub fn get_voice_call_input_device(_is_cm: bool) -> String {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     if _is_cm {
         match crate::ipc::get_config("voice-call-input") {
             Ok(Some(device)) => device,
@@ -1812,7 +1812,7 @@ pub fn get_voice_call_input_device(_is_cm: bool) -> String {
     } else {
         crate::audio_service::get_voice_call_input_device().unwrap_or_default()
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     "".to_owned()
 }
 
@@ -1897,11 +1897,11 @@ pub fn main_is_root() -> bool {
 }
 
 pub fn get_double_click_time() -> SyncReturn<i32> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         return SyncReturn(crate::platform::get_double_click_time() as _);
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     SyncReturn(500i32)
 }
 
@@ -1997,7 +1997,7 @@ pub fn session_send_mouse(session_id: SessionID, msg: String) {
             // The server does not track mode deactivation; it simply stops receiving
             // relative move events when the client exits relative mouse mode.
             if !active {
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
                 crate::keyboard::set_relative_mouse_mode_state(false);
                 return;
             }
@@ -2045,7 +2045,7 @@ pub fn session_send_mouse(session_id: SessionID, msg: String) {
             }
 
             // All validation passed - marker will be forwarded as a no-op relative move.
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
             crate::keyboard::set_relative_mouse_mode_state(true);
         }
 
@@ -2178,7 +2178,7 @@ pub fn session_printer_response(
 }
 
 pub fn main_set_home_dir(_home: String) {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         *config::APP_HOME_DIR.write().unwrap() = _home;
     }
@@ -2234,11 +2234,11 @@ pub fn main_check_mouse_time() {
 }
 
 pub fn main_get_mouse_time() -> f64 {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         get_mouse_time()
     }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         0.0
     }
@@ -2315,7 +2315,7 @@ pub fn cm_elevate_portable(conn_id: i32) {
 }
 
 pub fn cm_switch_back(conn_id: i32) {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     crate::ui_cm_interface::switch_back(conn_id);
 }
 
@@ -2387,7 +2387,7 @@ pub fn main_is_installed() -> SyncReturn<bool> {
 }
 
 pub fn main_init_input_source() -> SyncReturn<()> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     crate::keyboard::input_source::init_input_source();
     SyncReturn(())
 }
@@ -2521,7 +2521,7 @@ pub fn main_has_gpu_texture_render() -> SyncReturn<bool> {
 }
 
 pub fn cm_init() {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     crate::flutter::connection_manager::cm_init();
 }
 
@@ -2585,11 +2585,11 @@ pub fn is_disable_installation() -> SyncReturn<bool> {
 
 pub fn is_preset_password() -> bool {
     // On desktop, service owns the authoritative config; query it via IPC and return only a boolean.
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     return crate::ipc::is_permanent_password_preset();
 
     // On mobile, we have no service IPC; verify against local storage.
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     return config::Config::is_using_preset_password();
 }
 
@@ -2635,11 +2635,11 @@ pub fn main_supported_privacy_mode_impls() -> SyncReturn<String> {
 }
 
 pub fn main_supported_input_source() -> SyncReturn<String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         SyncReturn("".to_owned())
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         SyncReturn(
             serde_json::to_string(&crate::keyboard::input_source::get_supported_input_source())
@@ -2682,9 +2682,9 @@ pub fn main_check_hwcodec() {
 
 // The bridge uses ordinary worker threads; desktop IPC needs a runtime at this boundary.
 pub fn main_get_trusted_devices() -> hbb_common::anyhow::Result<String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     return crate::trusted_devices::devices();
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     hbb_common::tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
@@ -2693,9 +2693,9 @@ pub fn main_get_trusted_devices() -> hbb_common::anyhow::Result<String> {
 
 pub fn main_remove_trusted_devices(json: String) -> hbb_common::anyhow::Result<()> {
     let record_ids = serde_json::from_str::<Vec<[u8; crate::trusted_devices::TOKEN_BYTES]>>(&json)?;
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     return crate::trusted_devices::remove(&record_ids);
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     hbb_common::tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
@@ -2707,9 +2707,9 @@ pub fn main_remove_trusted_devices(json: String) -> hbb_common::anyhow::Result<(
 
 pub fn main_renew_trusted_devices(json: String) -> hbb_common::anyhow::Result<()> {
     let record_ids = serde_json::from_str::<Vec<[u8; crate::trusted_devices::TOKEN_BYTES]>>(&json)?;
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     return crate::trusted_devices::renew(&record_ids);
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     hbb_common::tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
@@ -2720,9 +2720,9 @@ pub fn main_renew_trusted_devices(json: String) -> hbb_common::anyhow::Result<()
 }
 
 pub fn main_clear_trusted_devices() -> hbb_common::anyhow::Result<()> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     return crate::trusted_devices::clear();
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     hbb_common::tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?

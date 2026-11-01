@@ -98,3 +98,8 @@ build-*.log
 
 # 应用图标必须进库（上游的 *png 规则是给截图用的）
 !/ohos-app/**/*.png
+
+# --- 鸿蒙版本地忽略 ---
+.tmp-shot/
+ohos-app/hap9_check.so
+*.jpeg

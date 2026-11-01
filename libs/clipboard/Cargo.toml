@@ -40,7 +40,7 @@ dashmap = {version ="5.5", optional = true}
 utf16string = {version = "0.2", optional = true}
 once_cell = {version = "1.18", optional = true}
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 percent-encoding = {version  ="2.3", optional = true}
 x11-clipboard = {git="https://github.com/clslaid/x11-clipboard", branch = "feat/store-batch", optional = true}
 x11rb =  {version = "0.12", features = ["all-extensions"], optional = true}
