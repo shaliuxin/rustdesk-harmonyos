@@ -52,6 +52,24 @@ class MoreItem {
   }
 }
 
+// 聊天消息。
+//
+// RustDesk 的聊天就是**会话里的一条 Misc::ChatMessage**：不需要账号、不经过
+// 服务器存档，两台机器之间的连接上直接发（协议层就是 Message.misc.chat_message）。
+// 所以它天然是「点对点」的，也天然只在会话期间存在 —— 断开后历史就没了，
+// 这里只留本次会话的内存列表，不落盘。
+class ChatMsg {
+  mine: boolean = false;
+  text: string = '';
+  ts: number = 0;
+
+  constructor(mine: boolean, text: string) {
+    this.mine = mine;
+    this.text = text;
+    this.ts = Date.now();
+  }
+}
+
 const DOMAIN: number = 0x3200;
 const TAG: string = 'RustDeskSession';
 // 轴事件专用标签：滚轮/触控板这条通道单独成一个 tag，方便 `grep RustDeskAxis`
@@ -176,6 +194,16 @@ struct SessionPage {
   @State passwordInput: string = '';
   @State rememberPassword: boolean = false;
   @State passwordHint: string = '请输入被控机的访问密码';
+
+  // --- 聊天 ---
+  // 会话内的点对点文字消息（不需要账号登录，走的是同一条加密连接）。
+  @State chatOpen: boolean = false;
+  @State chatInput: string = '';
+  @State chatMsgs: ChatMsg[] = [];
+  // 未读计数：面板收起时收到消息就 +1，显示在底栏 💬 上。
+  @State chatUnread: number = 0;
+  // 列表滚动控制器：来新消息时自动滚到底。
+  private chatScroller: Scroller = new Scroller();
   // 「未加密连接」确认框。上游建链后若拿不到对端 E2EE 公钥，会停下等这一步确认；
   // 不弹这个框、或不把结果回给 Rust，连接就永久停住（黑屏、也不弹密码框）。
   @State showInsecureDialog: boolean = false;
@@ -390,6 +418,15 @@ struct SessionPage {
       case 'msgbox': {
         const d: MsgboxEventData = ev.data as MsgboxEventData;
         this.handleMsgbox(d);
+        break;
+      }
+      case 'chat': {
+        // 上游 new_message：对端通过会话发来一条文字（Message.misc.chat_message）。
+        // data 是 JSON 字符串（ui_handler 用 json!(msg) 包了一层）。
+        const text: string = ev.data !== undefined ? (ev.data as string) : '';
+        if (text.length > 0) {
+          this.onChatIncoming(text);
+        }
         break;
       }
       case 'close_connecting':
@@ -1318,6 +1355,179 @@ struct SessionPage {
     this.kbText = value;
   }
 
+  // --- 聊天 -----------------------------------------------------------------
+  //
+  // 走的是会话里的 Misc::ChatMessage，不依赖任何账号体系：
+  //   RustDesk.sendChat(text) → Data::Message(Misc.chat_message) → 对端
+  // 对端发来 → io_loop 的 ChatMessage 分支 → handler.new_message → UI 事件 'chat'
+  // 因为跑在同一条（加密的）连接上，所以既不需要登录，也不经过 ID 服务器存档。
+
+  private onChatIncoming(text: string): void {
+    const next: ChatMsg[] = this.chatMsgs.slice();
+    next.push(new ChatMsg(false, text));
+    this.chatMsgs = next;
+    if (this.chatOpen) {
+      this.scrollChatToEnd();
+    } else {
+      this.chatUnread = this.chatUnread + 1;
+      const brief: string = text.length > 24 ? `${text.substring(0, 24)}…` : text;
+      promptAction.showToast({ message: `收到消息：${brief}` });
+    }
+  }
+
+  private sendChatMsg(): void {
+    const t: string = this.chatInput.trim();
+    if (t.length === 0) {
+      return;
+    }
+    const rc: number = RustDesk.sendChat(t);
+    if (rc !== 0) {
+      promptAction.showToast({ message: `发送失败（${rc}）：会话可能已断开` });
+      return;
+    }
+    const next: ChatMsg[] = this.chatMsgs.slice();
+    next.push(new ChatMsg(true, t));
+    this.chatMsgs = next;
+    this.chatInput = '';
+    this.scrollChatToEnd();
+  }
+
+  private scrollChatToEnd(): void {
+    // 列表内容要等这一帧的数据刷新完才变高，立刻滚会停在旧位置。
+    setTimeout(() => {
+      this.chatScroller.scrollEdge(Edge.Bottom);
+    }, 30);
+  }
+
+  private openChat(): void {
+    this.chatOpen = true;
+    this.chatUnread = 0;
+    // 聊天输入框和「键盘条」抢同一个输入法，开聊天就把远程键盘收起来，
+    // 免得用户以为自己在往远端打字。
+    if (this.kbVisible) {
+      this.kbVisible = false;
+    }
+    this.scrollChatToEnd();
+  }
+
+  private toggleChat(): void {
+    if (this.chatOpen) {
+      this.chatOpen = false;
+    } else {
+      this.openChat();
+    }
+  }
+
+  // --- 聊天面板 -------------------------------------------------------------
+  //
+  // 做成浮在画面上的面板而不是独立页面：聊天时通常要一边看远端一边打字，
+  // 而且关掉面板那一刻会话不能断（独立页面很容易被用户当成「退出」）。
+  @Builder
+  chatPanel() {
+    Column() {
+      Row() {
+        Text('聊天')
+          .fontSize(14)
+          .fontColor('#FFFFFF')
+          .fontWeight(FontWeight.Medium)
+        Text('· 点对点，不经过服务器')
+          .fontSize(11)
+          .fontColor('#8A94A6')
+          .margin({ left: 6 })
+          .layoutWeight(1)
+        Text('清空')
+          .fontSize(12)
+          .fontColor('#8A94A6')
+          .padding(6)
+          .onClick(() => { this.chatMsgs = []; })
+        Text('✕')
+          .fontSize(15)
+          .fontColor('#FFFFFF')
+          .padding({ left: 8, right: 4, top: 4, bottom: 4 })
+          .onClick(() => { this.chatOpen = false; })
+      }
+      .width('100%')
+      .padding({ bottom: 6 })
+
+      if (this.chatMsgs.length === 0) {
+        Text('还没有消息。对方在 RustDesk 里打开「聊天」就能收到。')
+          .fontSize(12)
+          .fontColor('#5A6478')
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 24, bottom: 24 })
+      } else {
+        List({ scroller: this.chatScroller }) {
+          ForEach(this.chatMsgs, (m: ChatMsg) => {
+            ListItem() {
+              Row() {
+                if (m.mine) {
+                  Blank()
+                }
+                Text(m.text)
+                  .fontSize(14)
+                  .fontColor('#FFFFFF')
+                  .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+                  .borderRadius(10)
+                  .backgroundColor(m.mine ? '#0071FF' : '#33FFFFFF')
+                  .constraintSize({ maxWidth: '78%' })
+                  .textAlign(TextAlign.Start)
+                if (!m.mine) {
+                  Blank()
+                }
+              }
+              .width('100%')
+              .padding({ top: 3, bottom: 3 })
+            }
+          }, (m: ChatMsg, i: number) => `${m.ts}-${i}`)
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Auto)
+      }
+
+      Row({ space: 8 }) {
+        TextInput({ text: this.chatInput, placeholder: '输入消息…' })
+          .layoutWeight(1)
+          .height(40)
+          .fontSize(14)
+          .fontColor('#FFFFFF')
+          .placeholderColor('#8A94A6')
+          .backgroundColor('#33FFFFFF')
+          .borderRadius(8)
+          .enterKeyType(EnterKeyType.Send)
+          .onChange((v: string) => { this.chatInput = v; })
+          .onSubmit((_: EnterKeyType) => { this.sendChatMsg(); })
+        Text('发送')
+          .fontSize(14)
+          .fontColor('#FFFFFF')
+          .height(40)
+          .padding({ left: 14, right: 14 })
+          .borderRadius(8)
+          .backgroundColor('#0071FF')
+          .textAlign(TextAlign.Center)
+          .onClick(() => { this.sendChatMsg(); })
+      }
+      .width('100%')
+      .margin({ top: 8 })
+    }
+    .width('100%')
+    .height(this.chatHeight())
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .backgroundColor('#E60B1220')
+    .borderRadius({ topLeft: 14, topRight: 14 })
+    .borderWidth({ top: 0.5 })
+    .borderColor('#1B2536')
+  }
+
+  // 面板高度：手机竖屏给屏幕一半左右，横屏/PC 给固定值，避免把画面糊死。
+  private chatHeight(): number {
+    if (this.areaH > 0) {
+      return Math.min(360, Math.max(220, this.areaH * 0.5));
+    }
+    return 280;
+  }
+
   // --- UI -----------------------------------------------------------------
 
   // 宽屏（PC/平板）才在图标旁边带文字。手机竖屏 360 宽塞六个按钮会挤成一团，
@@ -1398,6 +1608,8 @@ struct SessionPage {
       this.barBtn('↕', '滚动', this.scrollMode ? '#FFD54F' : '#FFFFFF',
         () => { this.toggleScroll(); })
       this.barBtn('⌘', 'CAD', '#FFFFFF', () => { this.sendCtrlAltDel(); })
+      this.barBtn('💬', this.chatUnread > 0 ? `聊天(${this.chatUnread})` : '聊天',
+        this.chatOpen ? '#FFD54F' : '#FFFFFF', () => { this.toggleChat(); })
       this.barBtn('⋮', '更多', '#FFFFFF', () => { this.openMore(); })
       Blank()
       this.barBtn('⌄', '收起', '#FFFFFF', () => { this.barVisible = false; })
@@ -1749,6 +1961,11 @@ struct SessionPage {
               .borderRadius(20)
           }
           .margin({ bottom: 48 })
+        }
+
+        // 聊天面板浮在底栏上方：开着的时候底栏仍然可点，随时能关。
+        if (this.chatOpen) {
+          this.chatPanel()
         }
 
         // 底部工具栏（Android 的 BottomAppBar）。放在软键盘条**上面**：
