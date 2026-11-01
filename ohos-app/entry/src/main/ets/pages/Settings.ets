@@ -819,7 +819,12 @@ export struct SettingsPage {
         .width('100%')
       }
       .layoutWeight(1)
-      .scrollBar(BarState.Off)
+      // 桌面形态（2in1 / PC）给一条常驻滚动条，并且允许「按住左键拖动」滚动：
+      // ArkUI 的 Scroll 默认只认滚轮和触摸，鼠标拖拽是关掉的（enableScrollWithMouse
+      // 默认 false，API 26 起才提供），开关不打开就是「能滚轮、不能拖」。
+      // 手机形态保持不显示滚动条，避免占内容宽度。
+      .scrollBar(this.isPhone ? BarState.Off : BarState.On)
+      .enableScrollWithMouse(true)
     }
     .width('100%')
     .height('100%')

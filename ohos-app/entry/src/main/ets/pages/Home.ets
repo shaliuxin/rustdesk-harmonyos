@@ -679,7 +679,9 @@ struct Home {
     }
     .width('100%')
     .height('100%')
-    .scrollBar(BarState.Off)
+    // 桌面形态给常驻滚动条 + 允许鼠标按住拖动滚动（与设置页一致）。
+    .scrollBar(this.isPhone ? BarState.Off : BarState.On)
+    .enableScrollWithMouse(true)
   }
 
   // ======================= 主体 =======================

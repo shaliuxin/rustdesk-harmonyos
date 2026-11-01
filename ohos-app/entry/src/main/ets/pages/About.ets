@@ -243,7 +243,9 @@ struct About {
         .padding({ left: 12, right: 12 })
       }
       .layoutWeight(1)
-      .scrollBar(BarState.Off)
+      // 滚动条常驻 + 允许左键拖动滚动（Scroll 默认不支持鼠标拖，见 Settings.ets 注释）。
+      .scrollBar(BarState.Auto)
+      .enableScrollWithMouse(true)
     }
     .width('100%')
     .height('100%')

@@ -54,6 +54,12 @@ class MoreItem {
 
 const DOMAIN: number = 0x3200;
 const TAG: string = 'RustDeskSession';
+// 轴事件专用标签：滚轮/触控板这条通道单独成一个 tag，方便 `grep RustDeskAxis`
+// 直接看到「事件到底有没有进到 ArkUI」。
+const AXIS_TAG: string = 'RustDeskAxis';
+// 轴事件诊断条开关：排查期打开可以在会话页左上角看到原始轴值，
+// 日常关掉（日志仍然保留，`hilog | grep RustDeskAxis` 可查）。
+const AXIS_HUD: boolean = false;
 
 const LONG_PRESS_MS: number = 500;
 const MOVE_THRESHOLD_PX: number = 6;
@@ -92,9 +98,15 @@ const ARK_BTN_FORWARD: number = 5;
 // 手机形态的模拟器/触屏设备点一下往往同时上报 TouchEvent 和兼容 MouseEvent，
 // 不设闸门就会变成「点一下 = 按两次」，远端表现为双击。
 const MOUSE_AFTER_TOUCH_MS: number = 300;
-// 滚轮：ArkUI 轴事件给的是 vp，触控板一次给几 vp、鼠标一格给十几 vp。
-// 攒够这个量才发一格滚轮，避免触控板一划刷出几十个事件。
-const AXIS_VP_PER_STEP: number = 15;
+// 触控板双指给的是位移像素，攒够 AXIS_PX_PER_STEP 才发一格。
+// 这个值就是「灵敏度」：越小滚得越快。8 太肉（一屏内容要划好几次），
+// 取 4 大约是一格/4px，双指轻推就能滚半屏。
+const AXIS_PX_PER_STEP: number = 4;
+// 顶栏高度。桌面形态不需要 56 那么厚，44 就能放下返回箭头 + 两行状态，
+// 少遮一点远端画面。所有「顶栏区域不属于远端」的判断都引用它，改一处即可。
+const TOP_BAR_H: number = 44;
+// 顶栏底色：40% 不透明，压住白字又不至于挡住画面。
+const TOP_BAR_BG: string = '#660B1220';
 // SourceTool.TOUCHPAD 的数值（枚举是 @since 12，低版本运行时直接引用取不到值）。
 const SOURCE_TOOL_TOUCHPAD: number = 4;
 // 两组滚动之间的静默间隔：超过它就当成「新的一组」。
@@ -249,12 +261,15 @@ struct SessionPage {
   private lastDownTs: number = 0;
   // 鼠标通道是否真的注册（见 isRealDesktopDevice / MouseChannelModifier）。
   private mouseMod: MouseChannelModifier = new MouseChannelModifier(isRealDesktopDevice());
-  // 滚轮/触控板的累计量（vp），攒够 AXIS_VP_PER_STEP 才发一格；
+  // 滚轮/触控板的累计量（像素），攒够一格才发；
   // axisGroupTs 用来按「静默间隔」切分滚动组，不依赖 action 的 BEGIN/END。
   private axisAccum: number = 0;
   private axisSideAccum: number = 0;
   private axisGroupTs: number = 0;
   private axisLogTs: number = 0;
+  // 轴事件累计到达次数与最近一条的原始字段（排查触控板用，见 AXIS_HUD）。
+  private axisSeen: number = 0;
+  @State axisDbg: string = '';
   // 最近一次发给远端的鼠标位置（远端坐标）。轴事件没带合法落点时沿用它。
   private lastRemoteX: number = -1;
   private lastRemoteY: number = -1;
@@ -820,7 +835,7 @@ struct SessionPage {
     if (!Number.isFinite(hx) || !Number.isFinite(hy)) {
       return;
     }
-    if (hy < 56 || (this.kbVisible && hy > this.areaH - 56)) {
+    if (hy < TOP_BAR_H || (this.kbVisible && hy > this.areaH - 56)) {
       return;
     }
     const p: Position = this.toRemote(hx, hy);
@@ -837,7 +852,7 @@ struct SessionPage {
       return;
     }
     // 顶部 56vp 是本机状态栏、底部 56vp 是本机软键盘条，都不是远端画面。
-    if (ev.y < 56 || (this.kbVisible && ev.y > this.areaH - 56)) {
+    if (ev.y < TOP_BAR_H || (this.kbVisible && ev.y > this.areaH - 56)) {
       return;
     }
 
@@ -884,15 +899,21 @@ struct SessionPage {
     const nowTs: number = Date.now();
     const v: number = ev.getVerticalAxisValue();
     const hv: number = ev.getHorizontalAxisValue();
-    // 入口诊断：轴事件到底有没有进来、轴值多少、来自滚轮还是触控板。
+    this.axisSeen++;
+    // 入口诊断（**先记账，后过滤**）：触控板双指到底有没有进到 ArkUI，
+    // 就看这条。放在所有 return 之前，避免被后面的坐标/尺寸判断吞掉。
     // 注意 hilog **不支持 %{public}f**（实测打印成 "}f" 并把后面的参数全部错位），
     // 浮点一律乘 100 取整后按整数打。
-    if (nowTs - this.axisLogTs > 200) {
+    if (nowTs - this.axisLogTs > 100) {
       this.axisLogTs = nowTs;
-      hilog.info(DOMAIN, TAG,
-        'axis in act=%{public}d src=%{public}d tool=%{public}d x=%{public}d y=%{public}d v=%{public}d h=%{public}d remote=%{public}dx%{public}d',
-        ev.action, ev.source, ev.sourceTool, Math.round(ev.x), Math.round(ev.y),
+      hilog.error(DOMAIN, AXIS_TAG,
+        'axis #%{public}d act=%{public}d src=%{public}d tool=%{public}d x=%{public}d y=%{public}d v=%{public}d h=%{public}d rw=%{public}d rh=%{public}d',
+        this.axisSeen, ev.action, ev.source, ev.sourceTool, Math.round(ev.x), Math.round(ev.y),
         Math.round(v * 100), Math.round(hv * 100), this.remoteW, this.remoteH);
+      if (AXIS_HUD) {
+        this.axisDbg = `ax#${this.axisSeen} tool=${ev.sourceTool} v=${Math.round(v * 100) / 100} ` +
+          `h=${Math.round(hv * 100) / 100} xy=${Math.round(ev.x)},${Math.round(ev.y)}`;
+      }
     }
     if (this.remoteW <= 0 || this.remoteH <= 0) {
       return;
@@ -907,17 +928,22 @@ struct SessionPage {
     const ay: number = ev.y as number;
     let px: number = -1;
     let py: number = -1;
-    if (Number.isFinite(ax) && Number.isFinite(ay) &&
-      ay >= 56 && ay <= this.areaH - 56) {
+    if (Number.isFinite(ax) && Number.isFinite(ay) && ax >= 0 &&
+      ay >= TOP_BAR_H && ay <= this.areaH - 56) {
       const q: Position = this.toRemote(ax, ay);
       px = q.x;
       py = q.y;
-    } else if (this.lastRemoteX >= 0) {
+    }
+    if (px < 0 && this.lastRemoteX >= 0) {
       // 指针压在顶栏/工具栏上时，滚动仍应作用在远端当前光标处。
       px = this.lastRemoteX;
       py = this.lastRemoteY;
-    } else {
-      return;
+    }
+    if (px < 0) {
+      // 两端都没有落点（刚连上就划触控板，轴事件又不带坐标）：退到画面正中。
+      // 以前这里直接 return，表现就是「触控板双指完全没反应」。
+      px = Math.max(1, Math.round(this.displayW() / 2));
+      py = Math.max(1, Math.round(this.displayH() / 2));
     }
     // 滚轮协议里**不带位置**：服务端 WHEEL 分支把 x 当横向滚动量、y 当纵向
     // 滚动量（input_service.rs: 先 `let x = -evt.x;` 再 mouse_scroll_x/y），
@@ -926,7 +952,12 @@ struct SessionPage {
     // 服务端会当成横向滚动 -1600*120 格，纵向那一下被这个巨大横滚盖掉。
     // 这条 MOVE 等确认真的要发滚轮时再补（见函数末尾），避免触控板还在
     // 累计阶段就刷一串无意义的移动包。
+    // 单位判定：触控板双指给的是**位移像素**，鼠标滚轮给的是**角度**
+    // （一格约 ±15 度）。有的系统版本把触控板的 sourceTool 报成 UNKNOWN，
+    // 所以再加一条「幅值兜底」：来源未知且数值很小（< 10）的按像素算。
     const isTouchpad: boolean = ev.sourceTool === SOURCE_TOOL_TOUCHPAD;
+    const pixelish: boolean = isTouchpad ||
+      (ev.sourceTool as number) === 0 && Math.abs(v) < 10 && Math.abs(hv) < 10;
     // 分「一组」不再看 action：不同设备/系统版本给 BEGIN/END 的时机并不一致
     // （触控板实测只给 NONE），一旦 END 不来，原来的 axisSent 会永久卡住，
     // 表现为「滚一次之后就再也滚不动」。改成按时间切组：静默超过
@@ -937,20 +968,23 @@ struct SessionPage {
 
     let dx: number = 0;
     let dy: number = 0;
-    if (isTouchpad) {
-      // 触控板双指：轴值是**位移像素**（不是角度），按 vp 累计，攒够一格发一次。
+    if (pixelish) {
+      // 触控板双指：轴值是**位移像素**（不是角度），按像素累计，攒够一格发一次。
+      // 阈值取小一点（AXIS_PX_PER_STEP）：双指轻划一条事件只有几像素，
+      // 阈值太大就会出现「划了半屏才滚一格」甚至「一格都不滚」。
       this.axisAccum += v;
       this.axisSideAccum += hv;
-      const steps: number = Math.trunc(this.axisAccum / AXIS_VP_PER_STEP);
-      const sideSteps: number = Math.trunc(this.axisSideAccum / AXIS_VP_PER_STEP);
+      const steps: number = Math.trunc(this.axisAccum / AXIS_PX_PER_STEP);
+      const sideSteps: number = Math.trunc(this.axisSideAccum / AXIS_PX_PER_STEP);
       if (steps === 0 && sideSteps === 0) {
         return;
       }
-      this.axisAccum -= steps * AXIS_VP_PER_STEP;
-      this.axisSideAccum -= sideSteps * AXIS_VP_PER_STEP;
-      // 一次事件里累计出的格数可能很多，单包最多带 5 格，避免远端画面瞬移。
-      dy = steps > 0 ? Math.min(5, steps) : Math.max(-5, steps);
-      dx = sideSteps > 0 ? Math.min(5, sideSteps) : Math.max(-5, sideSteps);
+      this.axisAccum -= steps * AXIS_PX_PER_STEP;
+      this.axisSideAccum -= sideSteps * AXIS_PX_PER_STEP;
+      // 一次事件里累计出的格数可能很多，单包限幅避免远端画面瞬移。
+      // 触控板一次快速双指划动可能攒出十几格，上限放到 12 免得「越用力反而越慢」。
+      dy = steps > 0 ? Math.min(12, steps) : Math.max(-12, steps);
+      dx = sideSteps > 0 ? Math.min(12, sideSteps) : Math.max(-12, sideSteps);
     } else {
       // 鼠标滚轮：轴值是角度，一次物理咔哒会连来 2~3 条事件（实测 44ms 内 3 条），
       // 用时间窗去重，同一咔哒只发一格。
@@ -1107,7 +1141,7 @@ struct SessionPage {
     const t: TouchObject = changed[0];
     // 顶部 56vp 是状态栏按钮区，不当成远端点击（否则按返回/断开
     // 也会顺手在远端点一下）。
-    if (ev.type === TouchType.Down && t.y < 56) {
+    if (ev.type === TouchType.Down && t.y < TOP_BAR_H) {
       this.pressStartX = 0;
       this.pressStartY = 0;
       return;
@@ -1343,9 +1377,9 @@ struct SessionPage {
       // 必须给一个显式入口）。
     }
     .width('100%')
-    .height(56)
+    .height(TOP_BAR_H)
     .padding({ left: 8, right: 8 })
-    .backgroundColor('#CC0B1220')
+    .backgroundColor(TOP_BAR_BG)
   }
 
   // --- 底部工具栏 ---------------------------------------------------------
@@ -1665,7 +1699,7 @@ struct SessionPage {
 
       // 质量监视器：左上角小字，显示 网速 / FPS / 延迟 / 编解码格式（含 4:4:4）。
       // 开关来自设置页「显示质量监视器」，数据来自 Rust 的 quality_status 事件。
-      // position 挂在 Stack 坐标系上，y=64 让它落在 topBar（高 56）下方。
+      // position 挂在 Stack 坐标系上，y = 顶栏高度 + 8，落在顶栏下方。
       if (this.qmVisible && this.connected && this.qmText().length > 0) {
         Text(this.qmText())
           .fontSize(11)
@@ -1673,7 +1707,7 @@ struct SessionPage {
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
           .backgroundColor('#99000000')
           .borderRadius(4)
-          .position({ x: 8, y: 64 })
+          .position({ x: 8, y: TOP_BAR_H + 8 })
       }
 
       // 远程光标：只有对端光标**没有**内嵌进视频帧时才本地画（内嵌时画面里
@@ -1691,6 +1725,17 @@ struct SessionPage {
       // 浮层：顶部状态栏 + 底部提示 + 密码弹窗
       Column() {
         this.topBar()
+
+        // 轴事件诊断条（AXIS_HUD）：确认触控板双指到底有没有进到 ArkUI。
+        if (AXIS_HUD && this.axisDbg !== '') {
+          Text(this.axisDbg)
+            .fontSize(11)
+            .fontColor('#FFD400')
+            .backgroundColor('#99000000')
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .margin({ left: 8, top: 4 })
+            .hitTestBehavior(HitTestMode.None)
+        }
         Blank()
         // 画面没出来之前一直显示进度/状态；图片一旦渲染就收起，
         // 避免遮住远端桌面。
@@ -1765,6 +1810,12 @@ struct SessionPage {
       // 是当年 onTouch 还挂在 XComponent 上的旧结构，现在挂在最外层 Stack 上，
       // 两种模式都收得到；别再轻易改这一个枚举。
       .hitTestBehavior(HitTestMode.Transparent)
+      // 轴事件（滚轮 / 触控板双指）必须挂在**这层浮层**上：
+      // XComponent 是独立 Surface 图层，轴事件会在它那里被吃掉，根本不上抛到
+      // 外层 Stack（实测：外层 Stack 的 onAxisEvent 一条都没触发，连系统
+      // uinput 注入的滚轮也收不到）。浮层在 XComponent 之上且 Transparent，
+      // 命中测试时它是「更上层」的目标，事件先到这里。
+      .onAxisEvent((ev: AxisEvent) => { this.handleAxis(ev); })
 
       if (this.showPasswordDialog) {
         this.passwordDialog()
