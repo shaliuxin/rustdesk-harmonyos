@@ -99,9 +99,9 @@ const ARK_BTN_FORWARD: number = 5;
 // 不设闸门就会变成「点一下 = 按两次」，远端表现为双击。
 const MOUSE_AFTER_TOUCH_MS: number = 300;
 // 触控板双指给的是位移像素，攒够 AXIS_PX_PER_STEP 才发一格。
-// 这个值就是「灵敏度」：越小滚得越快。8 太肉（一屏内容要划好几次），
-// 取 4 大约是一格/4px，双指轻推就能滚半屏。
-const AXIS_PX_PER_STEP: number = 4;
+// 这个值就是「灵敏度」：越小滚得越快。8 太肉、4 仍偏慢，取 2.5 后
+// 双指轻推一下就是一屏。
+const AXIS_PX_PER_STEP: number = 2.5;
 // 顶栏高度。桌面形态不需要 56 那么厚，44 就能放下返回箭头 + 两行状态，
 // 少遮一点远端画面。所有「顶栏区域不属于远端」的判断都引用它，改一处即可。
 const TOP_BAR_H: number = 44;
