@@ -31,6 +31,10 @@ const C_DIM: string = '#8A94A6';
 const C_FAINT: string = '#5A6478';
 const C_DANGER: string = '#FF6B6B';
 const C_DIVIDER: string = '#1F2A3D';
+// ID 服务器连接状态圆点（与 Settings.ets 同一套配色）
+const DOT_READY: string = '#22C55E';      // 绿：已正常连接
+const DOT_CONNECTING: string = '#F5A524'; // 黄：正在连接
+const DOT_FAILED: string = '#EF4444';     // 红：连接失败
 
 const DOMAIN: number = 0x3200;
 const TAG: string = 'RustDeskHome';
@@ -54,9 +58,40 @@ struct Home {
   @State effectiveServer: string = '';
   @State permPwdEditing: boolean = false;
   @State permPwd: string = '';
+  // ID 服务器连接状态（0=连接中 1=已连接 2=失败，见 RustDesk.SERVER_STATUS_*）。
+  @State serverStatus: number = RustDesk.SERVER_STATUS_CONNECTING;
+  // 轮询定时器；-1 表示没在跑。
+  private statusTimer: number = -1;
 
   aboutToAppear(): void {
     this.refresh();
+    // 与设置页同一套：Rust 看门狗每 3 秒探测一次，这里 1 秒读一次结果。
+    this.refreshServerStatus();
+    this.statusTimer = setInterval(this.refreshServerStatus, 1000);
+  }
+
+  aboutToDisappear(): void {
+    if (this.statusTimer !== -1) {
+      clearInterval(this.statusTimer);
+      this.statusTimer = -1;
+    }
+  }
+
+  // 必须是**箭头函数属性**：普通方法当回调传出去会丢 this，
+  // 运行期直接 "Obj is not a Valid object"。
+  private refreshServerStatus = (): void => {
+    this.serverStatus = RustDesk.serverStatus();
+  }
+
+  // 状态圆点颜色：绿=已连接、黄=正在连接、红=连接失败。
+  private serverStatusColor(): string {
+    if (this.serverStatus === RustDesk.SERVER_STATUS_READY) {
+      return DOT_READY;
+    }
+    if (this.serverStatus === RustDesk.SERVER_STATUS_FAILED) {
+      return DOT_FAILED;
+    }
+    return DOT_CONNECTING;
   }
 
   // 从会话页返回时最近列表会多一条，必须刷新：页面不会重建，只有 onPageShow 会来。
@@ -496,17 +531,24 @@ struct Home {
         .margin({ bottom: 14 })
 
         // 生效服务器：连接排错时第一眼要看的就是它。
+        // 地址前的圆点＝这台服务器此刻连不连得上（绿=已连接/黄=连接中/红=失败）。
         Column() {
           Text('当前生效的 ID 服务器')
             .fontSize(12)
             .fontColor(C_DIM)
             .width('100%')
-          Text(this.effectiveServer.length > 0 ? this.effectiveServer : '（未初始化）')
-            .fontSize(14)
-            .fontColor(C_TEXT)
-            .fontFamily('monospace')
-            .width('100%')
-            .margin({ top: 4 })
+          Row() {
+            Circle({ width: 8, height: 8 })
+              .fill(this.serverStatusColor())
+              .margin({ right: 8 })
+            Text(this.effectiveServer.length > 0 ? this.effectiveServer : '（未初始化）')
+              .fontSize(14)
+              .fontColor(C_TEXT)
+              .fontFamily('monospace')
+              .layoutWeight(1)
+          }
+          .width('100%')
+          .margin({ top: 6 })
         }
         .width('100%')
         .padding(14)
