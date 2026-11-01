@@ -1144,19 +1144,17 @@ struct FilePage {
   actionBar(isRemote: boolean) {
     Row() {
       if (isRemote) {
-        this.actionBtn('下载', this.selCount(true) > 0 && this.connected,
-          this.selCount(true) > 0 ? `(${this.selCount(true)})` : '', () => { this.downloadSelected(); })
-        this.actionBtn('新建', this.connected, '', () => { this.askMkdir(true); })
-        this.actionBtn('改名', this.selCount(true) === 1 && this.connected, '', () => { this.askRename(true); })
-        this.actionBtn('删除', this.selCount(true) > 0 && this.connected, '', () => { this.doDelete(true); })
-        this.actionBtn('刷新', this.connected, '', () => { this.remoteRefresh(); })
+        this.actionBtn('下载', isRemote)
+        this.actionBtn('新建', isRemote)
+        this.actionBtn('改名', isRemote)
+        this.actionBtn('删除', isRemote)
+        this.actionBtn('刷新', isRemote)
       } else {
-        this.actionBtn('上传', this.selCount(false) > 0 && this.connected,
-          this.selCount(false) > 0 ? `(${this.selCount(false)})` : '', () => { this.uploadSelected(); })
-        this.actionBtn('导入', true, '', () => { this.pickAndImport(); })
-        this.actionBtn('导出', this.selCount(false) > 0, '', () => { this.exportSelected(); })
-        this.actionBtn('新建', true, '', () => { this.askMkdir(false); })
-        this.actionBtn('删除', this.selCount(false) > 0, '', () => { this.doDelete(false); })
+        this.actionBtn('上传', isRemote)
+        this.actionBtn('导入', isRemote)
+        this.actionBtn('导出', isRemote)
+        this.actionBtn('新建', isRemote)
+        this.actionBtn('删除', isRemote)
       }
     }
     .width('100%')
@@ -1165,23 +1163,96 @@ struct FilePage {
     .backgroundColor(C_BG)
   }
 
+  // ---------------------------------------------------------------------------
+  // 底栏按钮的实时状态。
+  //
+  // 注意 @Builder 的坑：**按值传参不建立状态绑定** —— 如果把 enabled/badge/act
+  // 当参数传进 actionBtn，它们会在首次渲染时被冻结（当时没选中 → enabled=false
+  // 永远 false，点击被 .enabled() 静默吞掉），表现恰好是用户看到的
+  // 「能选中文件、按钮看着是亮的、点了没反应」。所以这里只传 label，
+  // 可用性 / 徽标 / 动作全部在渲染与点击时从 this 实时求值。
+  // ---------------------------------------------------------------------------
+
+  private btnBadge(label: string, isRemote: boolean): string {
+    if (label === '下载' && isRemote) {
+      const n: number = this.selCount(true);
+      return n > 0 ? `(${n})` : '';
+    }
+    if (label === '上传' && !isRemote) {
+      const n: number = this.selCount(false);
+      return n > 0 ? `(${n})` : '';
+    }
+    return '';
+  }
+
+  private btnEnabled(label: string, isRemote: boolean): boolean {
+    const remoteSel: number = this.selCount(true);
+    const localSel: number = this.selCount(false);
+    switch (label) {
+      case '下载':
+        return isRemote && remoteSel > 0 && this.connected;
+      case '上传':
+        return !isRemote && localSel > 0 && this.connected;
+      case '改名':
+        return isRemote && remoteSel === 1 && this.connected;
+      case '删除':
+        return isRemote ? (remoteSel > 0 && this.connected) : localSel > 0;
+      case '刷新':
+        return isRemote && this.connected;
+      // 导入 / 导出 / 新建不依赖连接：导入走系统 picker，导出/新建是纯本机操作。
+      default:
+        return true;
+    }
+  }
+
+  private btnAct(label: string, isRemote: boolean): void {
+    switch (label) {
+      case '下载':
+        this.downloadSelected();
+        break;
+      case '上传':
+        this.uploadSelected();
+        break;
+      case '改名':
+        this.askRename(isRemote);
+        break;
+      case '删除':
+        this.doDelete(isRemote);
+        break;
+      case '刷新':
+        this.remoteRefresh();
+        break;
+      case '导入':
+        this.pickAndImport();
+        break;
+      case '导出':
+        this.exportSelected();
+        break;
+      case '新建':
+        this.askMkdir(isRemote);
+        break;
+      default:
+        break;
+    }
+  }
+
   @Builder
-  actionBtn(label: string, enabled: boolean, badge: string, act: () => void) {
+  actionBtn(label: string, isRemote: boolean) {
     Column() {
-      Text(badge.length > 0 ? `${label}${badge}` : label)
+      Text(this.btnBadge(label, isRemote).length > 0 ? `${label}${this.btnBadge(label, isRemote)}` : label)
         .fontSize(13)
-        .fontColor(enabled ? (label === '删除' ? C_ERR : C_TEXT) : C_FAINT)
+        .fontColor(this.btnEnabled(label, isRemote) ? (label === '删除' ? C_ERR : C_TEXT) : C_FAINT)
         .maxLines(1)
     }
     .layoutWeight(1)
     .height(40)
     .justifyContent(FlexAlign.Center)
     .borderRadius(9)
-    .backgroundColor(enabled ? C_CARD : Color.Transparent)
-    .enabled(enabled)
+    .backgroundColor(this.btnEnabled(label, isRemote) ? C_CARD : Color.Transparent)
+    .enabled(this.btnEnabled(label, isRemote))
     .onClick(() => {
-      if (enabled) {
-        act();
+      if (this.btnEnabled(label, isRemote)) {
+        this.btnAct(label, isRemote);
       }
     })
   }
