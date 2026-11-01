@@ -1201,6 +1201,15 @@ pub extern "C" fn rustdesk_ohos_capture_push_frame(
         return set_error("capture_push_frame: invalid argument");
     }
     let slice = unsafe { std::slice::from_raw_parts(data, len) };
+    // 采样日志：帧链路排障用。首 3 帧与之后每 150 帧打一条。
+    {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static PF_COUNT: AtomicU64 = AtomicU64::new(0);
+        let n = PF_COUNT.fetch_add(1, Ordering::Relaxed);
+        if n < 3 || n % 150 == 0 {
+            log::info!("ohos: capture frame #{} {}x{} len {}", n, width, height, len);
+        }
+    }
     scrap::push_frame(slice.to_vec(), width, height, stride);
     0
 }
@@ -1246,4 +1255,113 @@ pub extern "C" fn rustdesk_ohos_log_probe(msg: *const c_char) {
     let msg = cstr_arg(msg).unwrap_or_else(|| "probe".to_owned());
     ffi::log(1, &format!("probe from arkts: {}", msg));
     ui_handler::emit("probe", serde_json::json!(msg));
+}
+
+// ---------------------------------------------------------------------------
+// 被控端：远程协助（按需启动，不做常驻服务）
+// ---------------------------------------------------------------------------
+//
+// 设计取舍：HarmonyOS 不允许普通应用安装常驻服务，所以「被控」只以**临时
+// 远程协助**的形态存在 —— 用户在「共享屏幕」页手动打开开关，应用内起服务、
+// 向 ID 服务器注册、开始采集；关掉开关就全部拆掉。
+//
+// 这也符合平台合规：屏幕上出现的是应用自己的窗口 + 系统采集提示，
+// 不存在「后台悄悄被控」的可能。
+
+static HOST_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 查询本机是否具备被控能力（2in1 形态 + 系统有采集接口）。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_host_supported() -> c_int {
+    if ffi::ohos_capture_can_start() == 1 {
+        1
+    } else {
+        0
+    }
+}
+
+/// 注入授权状态：0 未授权 / 1 授权中 / 2 已授权。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_injection_status() -> c_int {
+    ffi::ohos_input_query_authorized()
+}
+
+/// 触发系统的「允许远程控制本机」授权弹窗。返回 0 表示已进入授权流程。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_request_injection() -> c_int {
+    let rc = ffi::ohos_input_request_authorization();
+    if rc != 0 {
+        return set_error(&format!("request_injection failed rc={}", rc));
+    }
+    0
+}
+
+/// 启动远程协助：采集 + 注册 + 监听，全部在应用进程内完成。
+///
+/// 顺序有讲究：**先起采集**（会弹系统授权，用户拒绝就整体失败），
+/// 成功后再起 rendezvous，避免出现「已注册但没画面」的半残状态。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_host_start() -> c_int {
+    if ffi::ohos_capture_can_start() != 1 {
+        return set_error("host: 本机型不支持被控（仅 2in1 可用）");
+    }
+    if HOST_RUNNING.swap(true, Ordering::SeqCst) {
+        log::info!("ohos host: already running");
+        return 0;
+    }
+
+    let rc = ffi::ohos_capture_start(0);
+    if rc != 0 {
+        HOST_RUNNING.store(false, Ordering::SeqCst);
+        return set_error(&format!(
+            "host: 屏幕采集未启动（rc={}），用户可能拒绝了授权",
+            rc
+        ));
+    }
+
+    // stop-service 可能是上次 stop 留下的，启动前显式清零。
+    config::Config::set_option("stop-service".to_owned(), "N".to_owned());
+
+    thread::Builder::new()
+        .name("ohos-host".into())
+        .spawn(|| {
+            // start_server 自带 #[tokio::main]，会在这个线程里建 runtime 并常驻。
+            crate::server::start_server(true);
+        })
+        .map_err(|e| format!("host: 线程创建失败: {e}"))
+        .map(|_| {
+            log::info!("ohos host: started (capture + rendezvous)");
+            0
+        })
+        .unwrap_or_else(|e| {
+            ffi::ohos_capture_stop();
+            HOST_RUNNING.store(false, Ordering::SeqCst);
+            set_error(&e)
+        })
+}
+
+/// 停止远程协助：断开会话、停采集、撤销注入授权。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_host_stop() -> c_int {
+    if !HOST_RUNNING.swap(false, Ordering::SeqCst) {
+        return 0;
+    }
+    ffi::ohos_capture_stop();
+    // 复用一个上游就有的开关：stop-service=Y 后 restart() 会让 mediator
+    // 退出循环并 close_connections()，不需要另开一条停止通道。
+    config::Config::set_option("stop-service".to_owned(), "Y".to_owned());
+    crate::RendezvousMediator::restart();
+    ffi::ohos_input_cancel_injection();
+    log::info!("ohos host: stopped");
+    0
+}
+
+/// 远程协助状态：0 停止 / 1 运行中（等待或正在进行会话）。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_host_state() -> c_int {
+    if HOST_RUNNING.load(Ordering::SeqCst) {
+        1
+    } else {
+        0
+    }
 }

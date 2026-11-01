@@ -89,6 +89,19 @@ export interface RustDeskNative {
   switchDisplay(index: number): number;
   sendChat(text: string): number;
 
+  // --- 被控端（远程协助，仅 2in1）---
+  // 不做常驻服务：hostStart 起采集 + 注册，hostStop 全拆。
+  // 返回 0 成功，负数失败（细节用 lastError() 读）。
+  hostSupported(): number;
+  hostStart(): number;
+  hostStop(): number;
+  /** 0 停止 / 1 运行中 */
+  hostState(): number;
+  /** 键鼠注入授权：0 未授权 / 1 授权中 / 2 已授权 */
+  injectionStatus(): number;
+  /** 触发系统授权弹窗，结果是异步的，用 injectionStatus() 复查 */
+  requestInjection(): number;
+
   // --- 会话操作（Android 底栏 ⋮「更多」菜单）---
   // 全部是「发一条消息给 io_loop」，返回 0 只代表已入队，不等结果。
 

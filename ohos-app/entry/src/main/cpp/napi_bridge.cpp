@@ -178,6 +178,34 @@ napi_value JsVersion(napi_env env, napi_callback_info /*info*/) {
     return TakeString(env, rustdesk_ohos_version());
 }
 
+// --- 被控端（远程协助）----------------------------------------------------
+// 只做一层薄转发：真正的状态机在 Rust 的 entry.rs 里，C++ 不保存副本，
+// 避免两处状态打架。
+
+napi_value JsHostSupported(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_host_supported());
+}
+
+napi_value JsHostStart(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_host_start());
+}
+
+napi_value JsHostStop(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_host_stop());
+}
+
+napi_value JsHostState(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_host_state());
+}
+
+napi_value JsInjectionStatus(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_injection_status());
+}
+
+napi_value JsRequestInjection(napi_env env, napi_callback_info /*info*/) {
+    return MakeInt(env, rustdesk_ohos_request_injection());
+}
+
 napi_value JsInit(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1] = {nullptr};
@@ -585,6 +613,12 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor desc[] = {
         {"abiVersion", nullptr, JsAbiVersion, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"version", nullptr, JsVersion, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hostSupported", nullptr, JsHostSupported, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hostStart", nullptr, JsHostStart, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hostStop", nullptr, JsHostStop, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"hostState", nullptr, JsHostState, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"injectionStatus", nullptr, JsInjectionStatus, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"requestInjection", nullptr, JsRequestInjection, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"init", nullptr, JsInit, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"lastError", nullptr, JsLastError, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sessionStart", nullptr, JsSessionStart, nullptr, nullptr, nullptr, napi_default, nullptr},

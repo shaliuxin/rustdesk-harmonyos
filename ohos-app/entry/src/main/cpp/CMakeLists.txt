@@ -151,6 +151,8 @@ target_link_libraries(entry PUBLIC
     libnative_display_manager.so # OH_NativeDisplayManager_*
     libdeviceinfo_ndk.z.so      # OH_GetDeviceType
     libohinput.so               # OH_Input_*(2in1 键鼠注入)
+    libnative_avscreen_capture.so # OH_AVScreenCapture_*（被控端采集）
+    libnative_media_core.so     # OH_AVBuffer_*（采集缓冲的读写）
     libc++_shared.so
     libdl.so
     libm.so

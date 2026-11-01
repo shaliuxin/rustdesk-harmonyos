@@ -18,12 +18,18 @@
 #include <deviceinfo.h>
 #include <hilog/log.h>
 #include <multimodalinput/oh_input_manager.h>
+#include <multimedia/player_framework/native_avbuffer.h>
+#include <multimedia/player_framework/native_avscreen_capture.h>
+#include <multimedia/player_framework/native_avscreen_capture_base.h>
 #include <window_manager/oh_display_info.h>
 #include <window_manager/oh_display_manager.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <dlfcn.h>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -178,14 +184,160 @@ int32_t ohos_lock_screen(void) { return -1; }  // 不支持，如实返回
 // ===========================================================================
 
 // 手机/平板没有鼠标指针，注入键鼠没有意义；2in1 才有。
-// 这里只判断形态，不判断「用户是否授权」——OHOS 的 OH_Input_Inject*
-// 需要 ohos.permission.INJECT_INPUT_EVENT（system_basic，要 ACL）。
-// 真上线时应该在 Ability 里申请，并把结果回填到这里。
+// 注入权限本身走「运行时由系统弹窗授权」那条路（OH_Input_RequestInjection，
+// API 20+），普通应用拿不到 ohos.permission.INJECT_INPUT_EVENT（system_basic + ACL）。
 int32_t ohos_input_can_inject(void) {
     return rustdesk_ohos::Is2in1() ? 1 : 0;
 }
 
-int32_t ohos_input_request_authorization(void) { return -1; }
+// --- 注入授权 --------------------------------------------------------------
+//
+// OH_Input_RequestInjection / OH_Input_QueryAuthorizedStatus 是 API 20 引入的，
+// 而本应用的 minAPIVersion 是 12：直接调用会让老系统在加载 .so 时解析不到符号。
+// 所以这两个函数用 dlsym 延迟绑定，拿不到就如实报告「系统不支持」。
+
+namespace {
+
+// 0=未授权 1=授权中 2=已授权；系统回调可能在任意线程写，故用 atomic。
+std::atomic<int32_t> g_inject_auth{0};
+
+void OnInjectAuthorized(int32_t status) {
+    g_inject_auth.store(status, std::memory_order_release);
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                 "inject authorize status -> %{public}d", status);
+}
+
+typedef int32_t (*FnRequestInjection)(void (*)(int32_t));
+typedef int32_t (*FnQueryAuthorized)(int32_t*);
+
+FnRequestInjection ResolveRequestInjection() {
+    static FnRequestInjection fn = reinterpret_cast<FnRequestInjection>(
+        dlsym(RTLD_DEFAULT, "OH_Input_RequestInjection"));
+    return fn;
+}
+
+FnQueryAuthorized ResolveQueryAuthorized() {
+    static FnQueryAuthorized fn = reinterpret_cast<FnQueryAuthorized>(
+        dlsym(RTLD_DEFAULT, "OH_Input_QueryAuthorizedStatus"));
+    return fn;
+}
+
+int64_t NowMicros() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<int64_t>(ts.tv_sec) * 1000000 + ts.tv_nsec / 1000;
+}
+
+}  // namespace
+
+/// 触发系统授权弹窗。返回 0 表示「已在授权流程中」或「已授权」。
+int32_t ohos_input_request_authorization(void) {
+    if (!rustdesk_ohos::Is2in1()) {
+        return -1;
+    }
+    FnRequestInjection fn = ResolveRequestInjection();
+    if (fn == nullptr) {
+        OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG,
+                     "OH_Input_RequestInjection unavailable (system < API 20)");
+        return -2;
+    }
+    int32_t rc = fn(OnInjectAuthorized);
+    switch (rc) {
+        case 0:                // INPUT_SUCCESS：等待用户在弹窗上确认
+        case 3900007:          // 已授权
+            if (rc == 3900007) {
+                g_inject_auth.store(2);
+            } else {
+                g_inject_auth.store(1);
+            }
+            return 0;
+        case 3900005:          // 正在授权中
+            g_inject_auth.store(1);
+            return 0;
+        case 3900008:          // 授权给了别的应用
+            g_inject_auth.store(0);
+            return -3;
+        default:
+            OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                         "request injection failed rc=%{public}d", rc);
+            return rc;
+    }
+}
+
+int32_t ohos_input_query_authorized(void) {
+    FnQueryAuthorized fn = ResolveQueryAuthorized();
+    if (fn != nullptr) {
+        int32_t status = 0;
+        if (fn(&status) == 0) {
+            g_inject_auth.store(status);
+        }
+    }
+    return g_inject_auth.load();
+}
+
+void ohos_input_cancel_injection(void) {
+    OH_Input_CancelInjection();
+    g_inject_auth.store(0);
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG, "injection cancelled");
+}
+
+int32_t ohos_input_inject_mouse_move(int32_t x, int32_t y) {
+    struct Input_MouseEvent* ev = OH_Input_CreateMouseEvent();
+    if (ev == nullptr) {
+        return -1;
+    }
+    OH_Input_SetMouseEventAction(ev, MOUSE_ACTION_MOVE);
+    OH_Input_SetMouseEventDisplayX(ev, x);
+    OH_Input_SetMouseEventDisplayY(ev, y);
+    OH_Input_SetMouseEventActionTime(ev, NowMicros());
+    int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
+    OH_Input_DestroyMouseEvent(&ev);
+    return rc;
+}
+
+int32_t ohos_input_inject_mouse_button(int32_t button, int32_t down, int32_t x, int32_t y) {
+    struct Input_MouseEvent* ev = OH_Input_CreateMouseEvent();
+    if (ev == nullptr) {
+        return -1;
+    }
+    OH_Input_SetMouseEventAction(ev, down != 0 ? MOUSE_ACTION_BUTTON_DOWN : MOUSE_ACTION_BUTTON_UP);
+    OH_Input_SetMouseEventButton(ev, button);
+    OH_Input_SetMouseEventDisplayX(ev, x);
+    OH_Input_SetMouseEventDisplayY(ev, y);
+    OH_Input_SetMouseEventActionTime(ev, NowMicros());
+    int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
+    OH_Input_DestroyMouseEvent(&ev);
+    return rc;
+}
+
+int32_t ohos_input_inject_mouse_wheel(int32_t x, int32_t y, float vertical) {
+    struct Input_MouseEvent* ev = OH_Input_CreateMouseEvent();
+    if (ev == nullptr) {
+        return -1;
+    }
+    OH_Input_SetMouseEventAction(ev, MOUSE_ACTION_AXIS_BEGIN);
+    OH_Input_SetMouseEventDisplayX(ev, x);
+    OH_Input_SetMouseEventDisplayY(ev, y);
+    OH_Input_SetMouseEventAxisType(ev, MOUSE_AXIS_SCROLL_VERTICAL);
+    OH_Input_SetMouseEventAxisValue(ev, vertical);
+    OH_Input_SetMouseEventActionTime(ev, NowMicros());
+    int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
+    OH_Input_DestroyMouseEvent(&ev);
+    return rc;
+}
+
+int32_t ohos_input_inject_key(int32_t keycode, int32_t down) {
+    struct Input_KeyEvent* ev = OH_Input_CreateKeyEvent();
+    if (ev == nullptr) {
+        return -1;
+    }
+    OH_Input_SetKeyEventKeyCode(ev, keycode);
+    OH_Input_SetKeyEventAction(ev, down != 0 ? KEY_ACTION_DOWN : KEY_ACTION_UP);
+    OH_Input_SetKeyEventActionTime(ev, NowMicros());
+    int32_t rc = OH_Input_InjectKeyEvent(ev);
+    OH_Input_DestroyKeyEvent(&ev);
+    return rc;
+}
 
 void ohos_input_block(int32_t block) {
     // RustDesk 的「屏蔽本机输入」在桌面上靠 grab 实现。OHOS 没有等价的
@@ -198,19 +350,174 @@ void ohos_input_block(int32_t block) {
 // 屏幕采集（被控端，M3）
 // ===========================================================================
 
-// ArkTS 侧用 AVScreenCapture 采集，编码后把 packet 交给
-// rustdesk_ohos_capture_push_frame（未编码 RGBA 路径）。
-// 这个能力开关留给 M3 接上 AVScreenCapture 后再返回 1。
-int32_t ohos_capture_can_start(void) { return 0; }
+// ===========================================================================
+// 屏幕采集（被控端）
+// ===========================================================================
+//
+// 走原生 OH_AVScreenCapture（回调模式，RGBA 原始流），把每帧直接推进
+// scrap 的共享槽（rustdesk_ohos_capture_push_frame），由 Rust 侧的
+// video_service 拿去做编码 —— 采集不做编码，避免两条编码链。
+//
+// 权限：StartScreenCapture 会由系统弹窗征求用户同意（第三方应用每次
+// 会话一次），不需要 ACL 权限。用户拒绝时 Start 返回非 0，UI 据此提示。
+
+namespace {
+
+OH_AVScreenCapture* g_capture = nullptr;
+int32_t g_cap_w = 0;
+int32_t g_cap_h = 0;
+std::atomic<bool> g_cap_on{false};
+
+void OnCaptureError(OH_AVScreenCapture* /*capture*/, int32_t code, void* /*userData*/) {
+    OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                 "screen capture error %{public}d", code);
+}
+
+void OnCaptureBuffer(OH_AVScreenCapture* capture, OH_AVBuffer* buffer,
+                     OH_AVScreenCaptureBufferType type, int64_t /*timestamp*/, void* /*userData*/) {
+    static std::atomic<int32_t> cb_count{0};
+    const int32_t n = cb_count.fetch_add(1);
+    if (n < 3 || n % 120 == 0) {
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                     "capture callback #%{public}d type=%{public}d on=%{public}d",
+                     n, static_cast<int32_t>(type), g_cap_on.load());
+    }
+    if (buffer == nullptr) {
+        return;
+    }
+    // 只要视频帧；音频由 RustDesk 自己的 audio_service 负责，这里不接。
+    if (type != OH_SCREEN_CAPTURE_BUFFERTYPE_VIDEO) {
+        return;
+    }
+    if (!g_cap_on.load(std::memory_order_acquire)) {
+        return;
+    }
+    uint8_t* addr = OH_AVBuffer_GetAddr(buffer);
+    int32_t capacity = OH_AVBuffer_GetCapacity(buffer);
+    if (addr == nullptr || capacity <= 0) {
+        return;
+    }
+    size_t offset = 0;
+    size_t size = static_cast<size_t>(capacity);
+    OH_AVCodecBufferAttr attr{};
+    if (OH_AVBuffer_GetBufferAttr(buffer, &attr) == AV_ERR_OK && attr.size > 0) {
+        offset = static_cast<size_t>(attr.offset);
+        size = static_cast<size_t>(attr.size);
+    }
+    if (offset + size > static_cast<size_t>(capacity)) {
+        // 元数据不可信时退回整块缓冲，避免越界。
+        offset = 0;
+        size = static_cast<size_t>(capacity);
+    }
+    const int32_t w = g_cap_w;
+    const int32_t h = g_cap_h;
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    const size_t stride = static_cast<size_t>(w) * 4;
+    const size_t need = stride * static_cast<size_t>(h);
+    if (size >= need) {
+        // 按配置的尺寸紧凑排布。若系统给了带 padding 的行宽，画面会歪，
+        // 届时需要从 attr 里取 stride（当前 API 未暴露，先按紧凑处理）。
+        rustdesk_ohos_capture_push_frame(addr + offset, need,
+                                         static_cast<size_t>(w),
+                                         static_cast<size_t>(h), stride);
+    }
+    // 回调返回前必须归还缓冲，否则系统不再投喂新帧。
+    OH_AVScreenCapture_ReleaseVideoBuffer(capture);
+}
+
+}  // namespace
+
+/// 本机能否采集屏幕（被控端前置条件）。手机形态不支持被控，返回 0。
+int32_t ohos_capture_can_start(void) {
+    return rustdesk_ohos::Is2in1() ? 1 : 0;
+}
 
 int32_t ohos_capture_start(uint32_t display_id) {
-    (void)display_id;
-    return -1;
+    if (!rustdesk_ohos::Is2in1()) {
+        OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG,
+                     "capture_start: not 2in1, refused");
+        return -1;
+    }
+    std::lock_guard<std::mutex> lk(g_capture_mu);
+    if (g_capture != nullptr) {
+        return 0;
+    }
+    (void)display_id;  // 当前只采主屏（OH_CAPTURE_HOME_SCREEN）
+
+    int32_t w = 0;
+    int32_t h = 0;
+    if (OH_NativeDisplayManager_GetDefaultDisplayWidth(&w) != DISPLAY_MANAGER_OK ||
+        OH_NativeDisplayManager_GetDefaultDisplayHeight(&h) != DISPLAY_MANAGER_OK ||
+        w <= 0 || h <= 0) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "capture_start: display size unavailable");
+        return -2;
+    }
+    // 让 scrap 的显示器列表与真实屏幕一致，video_service 才能建服务。
+    rustdesk_ohos_displays_sync();
+
+    OH_AVScreenCapture* cap = OH_AVScreenCapture_Create();
+    if (cap == nullptr) {
+        return -3;
+    }
+
+    OH_AVScreenCaptureConfig cfg{};
+    cfg.captureMode = OH_CAPTURE_HOME_SCREEN;
+    cfg.dataType = OH_ORIGINAL_STREAM;  // 原始帧（RGBA），不是编码流
+    cfg.videoInfo.videoCapInfo.videoFrameWidth = w;
+    cfg.videoInfo.videoCapInfo.videoFrameHeight = h;
+    cfg.videoInfo.videoCapInfo.videoSource = OH_VIDEO_SOURCE_SURFACE_RGBA;
+
+    OH_AVSCREEN_CAPTURE_ErrCode rc = OH_AVScreenCapture_Init(cap, cfg);
+    if (rc != AV_SCREEN_CAPTURE_ERR_OK) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "capture init failed rc=%{public}d", static_cast<int32_t>(rc));
+        OH_AVScreenCapture_Release(cap);
+        return -4;
+    }
+
+    OH_AVScreenCapture_SetErrorCallback(cap, OnCaptureError, nullptr);
+    OH_AVScreenCapture_SetDataCallback(cap, OnCaptureBuffer, nullptr);
+
+    g_cap_w = w;
+    g_cap_h = h;
+    g_cap_on.store(true, std::memory_order_release);
+    g_capture_running = true;
+
+    rc = OH_AVScreenCapture_StartScreenCapture(cap);
+    if (rc != AV_SCREEN_CAPTURE_ERR_OK) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG,
+                     "start screen capture failed rc=%{public}d (user denied?)",
+                     static_cast<int32_t>(rc));
+        g_cap_on.store(false, std::memory_order_release);
+        g_capture_running = false;
+        OH_AVScreenCapture_Release(cap);
+        return -5;
+    }
+
+    g_capture = cap;
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG,
+                 "screen capture started, %{public}dx%{public}d RGBA", w, h);
+    return 0;
 }
 
 int32_t ohos_capture_stop(void) {
-    std::lock_guard<std::mutex> lk(g_capture_mu);
-    g_capture_running = false;
+    OH_AVScreenCapture* cap = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(g_capture_mu);
+        g_cap_on.store(false, std::memory_order_release);
+        g_capture_running = false;
+        cap = g_capture;
+        g_capture = nullptr;
+    }
+    if (cap != nullptr) {
+        OH_AVScreenCapture_StopScreenCapture(cap);
+        OH_AVScreenCapture_Release(cap);
+        rustdesk_ohos_capture_clear();
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG, "screen capture stopped");
+    }
     return 0;
 }
 

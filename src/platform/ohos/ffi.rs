@@ -34,6 +34,17 @@ mod raw {
         pub fn ohos_input_can_inject() -> c_int; // 0/1，内部综合“形态 + 授权状态”
         pub fn ohos_input_request_authorization() -> c_int; // 触发系统授权弹窗，异步
         pub fn ohos_input_block(block: c_int);
+        pub fn ohos_input_query_authorized() -> c_int; // 0 未授权 / 1 授权中 / 2 已授权
+        pub fn ohos_input_cancel_injection();
+        pub fn ohos_input_inject_mouse_move(x: c_int, y: c_int) -> c_int;
+        pub fn ohos_input_inject_mouse_button(
+            button: c_int,
+            down: c_int,
+            x: c_int,
+            y: c_int,
+        ) -> c_int;
+        pub fn ohos_input_inject_mouse_wheel(x: c_int, y: c_int, vertical: f32) -> c_int;
+        pub fn ohos_input_inject_key(keycode: c_int, down: c_int) -> c_int;
 
         // --- 屏幕采集（被控端）---
         pub fn ohos_capture_can_start() -> c_int;
@@ -121,8 +132,45 @@ pub fn ohos_input_can_inject() -> c_int {
     unsafe { raw::ohos_input_can_inject() }
 }
 
+pub fn ohos_input_request_authorization() -> c_int {
+    unsafe { raw::ohos_input_request_authorization() }
+}
+
+pub fn ohos_input_query_authorized() -> c_int {
+    unsafe { raw::ohos_input_query_authorized() }
+}
+
+pub fn ohos_input_cancel_injection() {
+    unsafe { raw::ohos_input_cancel_injection() }
+}
+
+pub fn ohos_input_inject_mouse_move(x: i32, y: i32) -> c_int {
+    unsafe { raw::ohos_input_inject_mouse_move(x, y) }
+}
+
+pub fn ohos_input_inject_mouse_button(button: i32, down: bool, x: i32, y: i32) -> c_int {
+    unsafe { raw::ohos_input_inject_mouse_button(button, down as c_int, x, y) }
+}
+
+pub fn ohos_input_inject_mouse_wheel(x: i32, y: i32, vertical: f32) -> c_int {
+    unsafe { raw::ohos_input_inject_mouse_wheel(x, y, vertical) }
+}
+
+pub fn ohos_input_inject_key(keycode: i32, down: bool) -> c_int {
+    unsafe { raw::ohos_input_inject_key(keycode, down as c_int) }
+}
+
+
 pub fn ohos_capture_can_start() -> c_int {
     unsafe { raw::ohos_capture_can_start() }
+}
+
+pub fn ohos_capture_start(display_id: u32) -> c_int {
+    unsafe { raw::ohos_capture_start(display_id) }
+}
+
+pub fn ohos_capture_stop() -> c_int {
+    unsafe { raw::ohos_capture_stop() }
 }
 
 pub fn ohos_get_active_user_name() -> String {

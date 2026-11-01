@@ -469,11 +469,13 @@ async fn create_relay_connection_(
     // The proxy's address family does not constrain the relay target.
     let relay_server = crate::check_port(relay_server, RELAY_PORT);
     let use_ws_proxy = Config::is_proxy() && is_ws_endpoint(&check_ws(&relay_server));
+    log::info!("relay: connecting to {relay_server}");
     let mut stream = socket_client::connect_tcp(
         socket_client::ipv4_to_ipv6(relay_server, ipv4 || use_ws_proxy),
         CONNECT_TIMEOUT,
     )
     .await?;
+    log::info!("relay: connected, sending RequestRelay");
     let mut msg_out = RendezvousMessage::new();
     let licence_key = crate::get_key(true).await;
     msg_out.set_request_relay(RequestRelay {
@@ -482,7 +484,9 @@ async fn create_relay_connection_(
         ..Default::default()
     });
     stream.send(&msg_out).await?;
+    log::info!("relay: RequestRelay sent, waiting for peer via hbbr");
     create_tcp_connection(server, stream, peer_addr, secure, meta).await?;
+    log::info!("relay: connection established for {peer_addr}");
     Ok(())
 }
 
