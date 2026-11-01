@@ -116,6 +116,63 @@ export interface ChatEventData {
   text: string;
 }
 
+// --- 文件传输事件 ----------------------------------------------------------
+//
+// 全部由 src/platform/ohos/ui_handler.rs 发出。id 的语义：
+//   id > 0  传输任务（下载/上传），进度、完成、出错都带这个 id；
+//   id == 0 单纯的「浏览目录」回包（read_remote_dir 没有任务）；
+//   其它  端上新建/删除/改名操作的回执（见 filesMkdir 的返回值）。
+
+export interface FileEntryData {
+  name: string;
+  // 0=Dir 1=File 2=Symlink（protobuf FileType 的数值）
+  entry_type: number;
+  is_hidden: boolean;
+  size: number;
+  modified_time: number; // Unix 秒
+}
+
+export interface FolderFilesEventData {
+  id: number;
+  path: string;
+  is_local: boolean;
+  // true 表示这条只是「任务里有几个文件」的统计，不是目录内容，别拿去渲染列表。
+  only_count: boolean;
+  entries: FileEntryData[];
+}
+
+export interface JobProgressEventData {
+  id: number;
+  file_num: number;
+  speed: number;         // 字节/秒
+  finished_size: number; // 已传字节
+}
+
+export interface JobErrorEventData {
+  id: number;
+  err: string;
+  file_num: number;
+}
+
+export interface JobDoneEventData {
+  id: number;
+  file_num: number;
+}
+
+export interface OverrideConfirmEventData {
+  id: number;
+  file_num: number;
+  to: string;
+  is_upload: boolean;
+  is_identical: boolean;
+}
+
+export interface ConfirmDeleteEventData {
+  id: number;
+  index: number;
+  name: string;
+}
+
 // --- 鼠标掩码 --------------------------------------------------------------
 // 与 src/common.rs 的 MOUSE_TYPE_* / MOUSE_BUTTON_* 一致。
 //
@@ -611,6 +668,56 @@ export class RustDesk {
 
   static logProbe(msg: string): void {
     native.logProbe(msg);
+  }
+
+  // --- 文件传输 -----------------------------------------------------------
+  //
+  // 与远程桌面是**两个会话类型**：filesStart 建的是 FileTransfer 连接，
+  // 对端不会推视频，只会跑文件协议（对方屏幕上会弹「请求文件传输」）。
+  // 所以进文件管理器前不需要（也不能）先 startSession。
+  //
+  // 目录列表不走返回值：远端目录要等对端回包，统一通过 folder_files 事件。
+
+  static filesStart(peerId: string, password: string, forceRelay: boolean): number {
+    return native.filesStart(peerId, password, forceRelay ? 1 : 0);
+  }
+
+  static filesList(path: string, includeHidden: boolean): number {
+    return native.filesList(path, includeHidden ? 1 : 0);
+  }
+
+  static filesMkdir(path: string): number {
+    return native.filesMkdir(path);
+  }
+
+  static filesRename(path: string, newName: string): number {
+    return native.filesRename(path, newName);
+  }
+
+  static filesRemove(path: string, isDir: boolean): number {
+    return native.filesRemove(path, isDir ? 1 : 0);
+  }
+
+  static filesDownload(remotePath: string, localTo: string): number {
+    return native.filesDownload(remotePath, localTo);
+  }
+
+  static filesUpload(localPath: string, remoteDir: string): number {
+    return native.filesUpload(localPath, remoteDir);
+  }
+
+  static filesCancel(id: number): void {
+    native.filesCancel(id);
+  }
+
+  static filesResume(id: number, isRemote: boolean): void {
+    native.filesResume(id, isRemote ? 1 : 0);
+  }
+
+  static filesConfirm(id: number, fileNum: number, needOverride: boolean,
+                      remember: boolean, isUpload: boolean): void {
+    native.filesConfirm(id, fileNum, needOverride ? 1 : 0, remember ? 1 : 0,
+      isUpload ? 1 : 0);
   }
 }
 

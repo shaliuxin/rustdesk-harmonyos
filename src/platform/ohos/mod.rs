@@ -21,6 +21,7 @@ pub mod ffi;
 //   session    Session<OhosUiSession> 的创建与生命周期，内部复用上游 io_loop
 //   ui_handler InvokeUiSession 的鸿蒙实现：帧槽 + JSON 事件
 pub mod entry;
+pub mod files;
 pub mod session;
 pub mod ui_handler;
 

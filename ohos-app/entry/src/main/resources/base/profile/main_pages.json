@@ -2,6 +2,7 @@
   "src": [
     "pages/Home",
     "pages/SessionPage",
+    "pages/FilePage",
     "pages/About",
     "pages/Scan"
   ]

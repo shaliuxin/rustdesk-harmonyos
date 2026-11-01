@@ -138,6 +138,28 @@ export interface RustDeskNative {
 
   // 注册 UI 事件回调。只有最后一个生效。
   onEvent(callback: (json: string) => void): boolean;
+
+  // --- 文件传输（与远程桌面是两个会话类型，进文件管理器前先 filesStart）---
+
+  // 建文件传输会话。参数同 sessionStart。
+  filesStart(peerId: string, password: string, forceRelay: number): number;
+  // 读远端目录。path 传空串 = 对端默认目录。结果走 folder_files 事件。
+  filesList(path: string, includeHidden: number): number;
+  // 远端操作，返回操作 id。文件名不是路径（同目录改名）。
+  filesMkdir(path: string): number;
+  filesRename(path: string, newName: string): number;
+  // isDir 非 0 = 递归删除整个目录。
+  filesRemove(path: string, isDir: number): number;
+  // 下载：remotePath 远端条目 → localTo 本机完整目标路径。返回任务 id。
+  filesDownload(remotePath: string, localTo: string): number;
+  // 上传：localPath 本机条目 → remoteDir 远端目录。返回任务 id。
+  filesUpload(localPath: string, remoteDir: string): number;
+  filesCancel(id: number): void;
+  // isRemote 与建任务方向一致：下载 1、上传 0。
+  filesResume(id: number, isRemote: number): void;
+  // 覆盖确认：needOverride 1=覆盖 0=跳过；remember=记住选择。
+  filesConfirm(id: number, fileNum: number, needOverride: number,
+    remember: number, isUpload: number): void;
 }
 
 declare const rustdesk: RustDeskNative;

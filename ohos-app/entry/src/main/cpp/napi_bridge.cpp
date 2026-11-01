@@ -595,6 +595,133 @@ napi_value JsOnEvent(napi_env env, napi_callback_info info) {
     return MakeBool(env, true);
 }
 
+// --- 文件传输 --------------------------------------------------------------
+//
+// 全部是「转发 + 类型转换」，没有任何状态：会话语义、任务队列、进度都在
+// Rust 侧（src/platform/ohos/files.rs）。这里多一层的原因只是 ArkTS 不能
+// 直接调 C 符号。
+
+napi_value JsFilesStart(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    std::string peer_id;
+    std::string password;
+    int32_t force_relay = 0;
+    if (argc < 1 || !GetStringArg(env, args[0], peer_id)) return MakeInt(env, -1);
+    if (argc >= 2 && args[1] != nullptr) GetStringArg(env, args[1], password);
+    if (argc >= 3 && args[2] != nullptr) GetIntArg(env, args[2], force_relay);
+
+    return MakeInt(env, rustdesk_ohos_files_start(peer_id.c_str(), password.c_str(), force_relay));
+}
+
+// path 允许空串（= 对端默认目录），所以不能像别的函数那样把空串当错误。
+napi_value JsFilesList(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    std::string path;
+    int32_t hidden = 0;
+    if (argc >= 1 && args[0] != nullptr) GetStringArg(env, args[0], path);
+    if (argc >= 2 && args[1] != nullptr) GetIntArg(env, args[1], hidden);
+    return MakeInt(env, rustdesk_ohos_files_list(path.c_str(), hidden));
+}
+
+napi_value JsFilesMkdir(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string path;
+    if (argc < 1 || !GetStringArg(env, args[0], path)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_files_mkdir(path.c_str()));
+}
+
+napi_value JsFilesRename(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string path;
+    std::string name;
+    if (argc < 1 || !GetStringArg(env, args[0], path)) return MakeInt(env, -1);
+    if (argc < 2 || !GetStringArg(env, args[1], name)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_files_rename(path.c_str(), name.c_str()));
+}
+
+napi_value JsFilesRemove(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string path;
+    int32_t is_dir = 0;
+    if (argc < 1 || !GetStringArg(env, args[0], path)) return MakeInt(env, -1);
+    if (argc >= 2 && args[1] != nullptr) GetIntArg(env, args[1], is_dir);
+    return MakeInt(env, rustdesk_ohos_files_remove(path.c_str(), is_dir));
+}
+
+napi_value JsFilesDownload(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string remote;
+    std::string local;
+    if (argc < 1 || !GetStringArg(env, args[0], remote)) return MakeInt(env, -1);
+    if (argc < 2 || !GetStringArg(env, args[1], local)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_files_download(remote.c_str(), local.c_str()));
+}
+
+napi_value JsFilesUpload(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string local;
+    std::string remote_dir;
+    if (argc < 1 || !GetStringArg(env, args[0], local)) return MakeInt(env, -1);
+    if (argc >= 2 && args[1] != nullptr) GetStringArg(env, args[1], remote_dir);
+    return MakeInt(env, rustdesk_ohos_files_upload(local.c_str(), remote_dir.c_str()));
+}
+
+napi_value JsFilesCancel(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t id = 0;
+    if (argc >= 1) GetIntArg(env, args[0], id);
+    rustdesk_ohos_files_cancel(id);
+    return MakeUndefined(env);
+}
+
+napi_value JsFilesResume(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t id = 0;
+    int32_t is_remote = 1;
+    if (argc >= 1) GetIntArg(env, args[0], id);
+    if (argc >= 2) GetIntArg(env, args[1], is_remote);
+    rustdesk_ohos_files_resume(id, is_remote);
+    return MakeUndefined(env);
+}
+
+napi_value JsFilesConfirm(napi_env env, napi_callback_info info) {
+    size_t argc = 5;
+    napi_value args[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    int32_t id = 0;
+    int32_t file_num = 0;
+    int32_t need_override = 0;
+    int32_t remember = 0;
+    int32_t is_upload = 0;
+    if (argc >= 1) GetIntArg(env, args[0], id);
+    if (argc >= 2) GetIntArg(env, args[1], file_num);
+    if (argc >= 3) GetIntArg(env, args[2], need_override);
+    if (argc >= 4) GetIntArg(env, args[3], remember);
+    if (argc >= 5) GetIntArg(env, args[4], is_upload);
+    rustdesk_ohos_files_confirm(id, file_num, need_override, remember, is_upload);
+    return MakeUndefined(env);
+}
+
 // --- 模块注册 --------------------------------------------------------------
 
 napi_value Init(napi_env env, napi_value exports) {
@@ -659,6 +786,16 @@ napi_value Init(napi_env env, napi_value exports) {
         {"displaysSync", nullptr, JsDisplaysSync, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"logProbe", nullptr, JsLogProbe, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setRenderActive", nullptr, JsSetRenderActive, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesStart", nullptr, JsFilesStart, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesList", nullptr, JsFilesList, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesMkdir", nullptr, JsFilesMkdir, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesRename", nullptr, JsFilesRename, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesRemove", nullptr, JsFilesRemove, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesDownload", nullptr, JsFilesDownload, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesUpload", nullptr, JsFilesUpload, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesCancel", nullptr, JsFilesCancel, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesResume", nullptr, JsFilesResume, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"filesConfirm", nullptr, JsFilesConfirm, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"onEvent", nullptr, JsOnEvent, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);

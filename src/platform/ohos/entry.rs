@@ -16,7 +16,7 @@
 //! 错误约定：返回 `c_int` 的函数，0 = 成功，负数为错误码；需要细节时再调
 //! `rustdesk_ohos_last_error()`。
 
-use super::{ffi, session, ui_handler};
+use super::{ffi, files, session, ui_handler};
 use hbb_common::{
     config,
     config::RENDEZVOUS_PORT,
@@ -1493,4 +1493,176 @@ pub extern "C" fn rustdesk_ohos_host_state() -> c_int {
     } else {
         0
     }
+}
+
+// ---------------------------------------------------------------------------
+// 文件传输（主控侧）
+//
+// 约定与传输类调用一致：0 或**正整数任务 id** 表示成功，负数表示失败。
+// 目录列表本身不从这里返回 —— 它是异步事件 `folder_files`，因为远端目录
+// 要等对端回包，同步返回只能拿到“已发出请求”。
+// ---------------------------------------------------------------------------
+
+/// 建文件传输会话。参数与 `session_start` 完全一致，只是连接类型不同。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_start(
+    peer_id: *const c_char,
+    password: *const c_char,
+    force_relay: c_int,
+) -> c_int {
+    let peer_id = match cstr_arg(peer_id) {
+        Some(v) if !v.trim().is_empty() => v,
+        _ => return set_error("files_start: empty peer id"),
+    };
+    let password = cstr_arg(password).unwrap_or_default();
+    match files::start(&peer_id, &password, force_relay != 0) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_error(format!("files_start failed: {}", e));
+            ERR_START_FAILED
+        }
+    }
+}
+
+/// 读远端目录。`path` 传空串 = 对端默认目录（通常是主目录）。
+/// 结果通过 `folder_files` 事件返回。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_list(path: *const c_char, include_hidden: c_int) -> c_int {
+    let path = cstr_arg(path).unwrap_or_default();
+    match files::list(&path, include_hidden != 0) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_error(format!("files_list: {}", e));
+            ERR_NO_SESSION
+        }
+    }
+}
+
+/// 在远端新建目录，返回操作 id。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_mkdir(path: *const c_char) -> c_int {
+    let path = match cstr_arg(path) {
+        Some(v) if !v.is_empty() => v,
+        _ => return set_error("files_mkdir: empty path"),
+    };
+    match files::mkdir(&path) {
+        Ok(id) => id,
+        Err(e) => {
+            set_error(format!("files_mkdir: {}", e));
+            ERR_NO_SESSION
+        }
+    }
+}
+
+/// 远端重命名。`new_name` 是文件名，不是路径。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_rename(
+    path: *const c_char,
+    new_name: *const c_char,
+) -> c_int {
+    let path = match cstr_arg(path) {
+        Some(v) if !v.is_empty() => v,
+        _ => return set_error("files_rename: empty path"),
+    };
+    let new_name = match cstr_arg(new_name) {
+        Some(v) if !v.trim().is_empty() && v != "." && v != ".." && !v.contains('/') => v,
+        _ => return set_error("files_rename: invalid new name"),
+    };
+    match files::rename(&path, &new_name) {
+        Ok(id) => id,
+        Err(e) => {
+            set_error(format!("files_rename: {}", e));
+            ERR_NO_SESSION
+        }
+    }
+}
+
+/// 删除远端文件（`is_dir=0`）或整个目录（`is_dir=1`，递归）。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_remove(path: *const c_char, is_dir: c_int) -> c_int {
+    let path = match cstr_arg(path) {
+        Some(v) if !v.is_empty() => v,
+        _ => return set_error("files_remove: empty path"),
+    };
+    match files::remove(&path, is_dir != 0) {
+        Ok(id) => id,
+        Err(e) => {
+            set_error(format!("files_remove: {}", e));
+            ERR_NO_SESSION
+        }
+    }
+}
+
+/// 下载：`remote_path` 是远端条目，`local_to` 是本机完整目标路径。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_download(
+    remote_path: *const c_char,
+    local_to: *const c_char,
+) -> c_int {
+    let remote_path = match cstr_arg(remote_path) {
+        Some(v) if !v.is_empty() => v,
+        _ => return set_error("files_download: empty remote path"),
+    };
+    let local_to = match cstr_arg(local_to) {
+        Some(v) if !v.is_empty() => v,
+        _ => return set_error("files_download: empty local path"),
+    };
+    match files::download(&remote_path, &local_to) {
+        Ok(id) => id,
+        Err(e) => {
+            set_error(format!("files_download: {}", e));
+            ERR_NO_SESSION
+        }
+    }
+}
+
+/// 上传：`local_path` 是本机条目，`remote_dir` 是远端目标目录。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_upload(
+    local_path: *const c_char,
+    remote_dir: *const c_char,
+) -> c_int {
+    let local_path = match cstr_arg(local_path) {
+        Some(v) if !v.is_empty() => v,
+        _ => return set_error("files_upload: empty local path"),
+    };
+    let remote_dir = cstr_arg(remote_dir).unwrap_or_default();
+    match files::upload(&local_path, &remote_dir) {
+        Ok(id) => id,
+        Err(e) => {
+            set_error(format!("files_upload: {}", e));
+            ERR_NO_SESSION
+        }
+    }
+}
+
+/// 取消任务。任务已结束时调用也无害。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_cancel(id: c_int) {
+    files::cancel(id);
+}
+
+/// 断点续传。`is_remote` 与建任务时的方向一致（下载 true、上传 false）。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_resume(id: c_int, is_remote: c_int) {
+    files::resume(id, is_remote != 0);
+}
+
+/// 回应「目标文件已存在」：`need_override` 非 0 = 覆盖，0 = 跳过；
+/// `remember` 非 0 = 记住这次选择（后续同名文件不再询问）。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_files_confirm(
+    id: c_int,
+    file_num: c_int,
+    need_override: c_int,
+    remember: c_int,
+    is_upload: c_int,
+) {
+    files::confirm_override(
+        id,
+        file_num,
+        need_override != 0,
+        remember != 0,
+        is_upload != 0,
+    );
 }

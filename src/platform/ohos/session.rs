@@ -97,6 +97,24 @@ pub const KEY_DEFAULT_IMAGE_QUALITY: &str = "ohos-default-image-quality";
 ///
 /// 返回后连接在后台线程上进行，结果通过 `ui_handler` 的 JSON 事件上报。
 pub fn start(peer_id: &str, password: &str, force_relay: bool) -> hbb_common::ResultType<()> {
+    start_conn(peer_id, password, force_relay, ConnType::DEFAULT_CONN)
+}
+
+/// 同 [`start`]，但指定连接类型。
+///
+/// 目前只有两种用法：
+///   - `DEFAULT_CONN`：远程桌面（画面 + 键鼠）；
+///   - `FILE_TRANSFER`：文件传输（对端不开视频，只跑文件协议）。
+///
+/// 除了这一处差异，登录、加密、中继、密码存储全部走同一套代码 ——
+/// 上游 Flutter 也是这么做的（`session_add(..., is_file_transfer: true)`），
+/// 所以不需要为文件传输再维护一个会话实现。
+pub fn start_conn(
+    peer_id: &str,
+    password: &str,
+    force_relay: bool,
+    conn_type: ConnType,
+) -> hbb_common::ResultType<()> {
     if peer_id.trim().is_empty() {
         hbb_common::bail!("empty peer id");
     }
@@ -111,7 +129,7 @@ pub fn start(peer_id: &str, password: &str, force_relay: bool) -> hbb_common::Re
     };
     session.lc.write().unwrap().initialize(
         peer_id.to_owned(),
-        ConnType::DEFAULT_CONN,
+        conn_type,
         None,
         force_relay,
         None,
@@ -183,7 +201,11 @@ pub fn start(peer_id: &str, password: &str, force_relay: bool) -> hbb_common::Re
     ui_handler::CURRENT_SID.store(session.ui_handler.sid, std::sync::atomic::Ordering::SeqCst);
     *SESSION.write().unwrap() = Some(session.clone());
 
-    log::info!("ohos: session start, peer {}", peer_id);
+    log::info!(
+        "ohos: session start, peer {} conn {:?}",
+        peer_id,
+        conn_type
+    );
     let running = session.clone();
     std::thread::spawn(move || {
         let round = session.connection_round_state.lock().unwrap().new_round();

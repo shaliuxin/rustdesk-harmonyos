@@ -309,6 +309,42 @@ int32_t ohos_display_info(int32_t index, OhosDisplayInfo *out);
 // --- 指针位置 -------------------------------------------------------------
 int32_t ohos_cursor_pos(int32_t *out_x, int32_t *out_y);
 
+// --- 文件传输（主控侧）-----------------------------------------------------
+//
+// 与「远程桌面」是**两个独立的会话类型**：文件传输连接不会开视频，
+// 对端收到的是 FileTransfer 登录请求（会弹「对方请求文件传输」授权框）。
+// 所以进文件管理器前要另起一个会话（先 session_close，再 files_start）。
+//
+// 返回约定：目录/操作类返回 0 失败时为负；传输类返回**正整数任务 id**。
+// 目录列表不从返回值给，走 ui_event 的 folder_files 事件。
+
+// 建文件传输会话。参数同 rustdesk_ohos_session_start。
+int32_t rustdesk_ohos_files_start(const char *peer_id, const char *password,
+                                  int32_t force_relay);
+
+// 读远端目录。path 传空串 = 对端默认目录（主目录）。
+// 结果：ui_event("folder_files", {id,path,is_local,only_count,entries:[...]})
+int32_t rustdesk_ohos_files_list(const char *path, int32_t include_hidden);
+
+// 远端新建目录 / 重命名（new_name 是文件名，不含目录）/ 删除（is_dir 非 0 递归删目录）
+int32_t rustdesk_ohos_files_mkdir(const char *path);
+int32_t rustdesk_ohos_files_rename(const char *path, const char *new_name);
+int32_t rustdesk_ohos_files_remove(const char *path, int32_t is_dir);
+
+// 下载：remote_path 远端条目 → local_to 本机完整目标路径（文件或目录本身）。
+// 上传：local_path 本机条目 → remote_dir 远端目标目录。
+int32_t rustdesk_ohos_files_download(const char *remote_path, const char *local_to);
+int32_t rustdesk_ohos_files_upload(const char *local_path, const char *remote_dir);
+
+// 取消任务 / 断点续传（is_remote 与建任务时的方向一致：下载 1、上传 0）。
+void rustdesk_ohos_files_cancel(int32_t id);
+void rustdesk_ohos_files_resume(int32_t id, int32_t is_remote);
+
+// 回应「目标文件已存在」：need_override 非 0 = 覆盖，0 = 跳过；
+// remember 非 0 = 记住选择。is_upload 必须与任务方向一致。
+void rustdesk_ohos_files_confirm(int32_t id, int32_t file_num, int32_t need_override,
+                                 int32_t remember, int32_t is_upload);
+
 // --- 内存与日志 -----------------------------------------------------------
 void ohos_free_string(char *s);
 void ohos_free_bytes(uint8_t *p);

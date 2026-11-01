@@ -241,6 +241,25 @@ struct Home {
     this.connecting = false;
   }
 
+  // 文件传输：与远程桌面是**两个会话类型**，所以走独立的页面。
+  //
+  // 这里不预先 startSession：文件传输页自己会 filesStart（内部会先关掉旧会话），
+  // 否则会出现「先建了个桌面会话、又立刻被文件会话顶掉」的闪烁。
+  private openFiles(id: string): void {
+    const target: string = id.trim();
+    if (target.length === 0) {
+      promptAction.showToast({ message: '请输入远端 ID' });
+      return;
+    }
+    if (!RustDesk.isInitialized()) {
+      promptAction.showToast({ message: `核心未初始化：${RustDesk.getLastError()}` });
+      return;
+    }
+    router.pushUrl({ url: 'pages/FilePage', params: { peerId: target } }).catch((e: Error) => {
+      promptAction.showToast({ message: `打开文件传输页失败：${e.message}` });
+    });
+  }
+
   private toggleFav(p: PeerInfo): void {
     const favs: string[] = [];
     for (let i = 0; i < this.peers.length; i++) {
@@ -378,6 +397,29 @@ struct Home {
     .borderRadius(13)
     .margin({ bottom: 10 })
     .onClick(() => { this.connect(p.id); })
+    // 长按出菜单：一个设备行上塞不下「连接 / 文件传输」两个按钮，
+    // 长按是手机上最省地方的做法（点按仍然是直接连接）。
+    .gesture(LongPressGesture().onAction(() => {
+      this.showPeerMenu(p.id);
+    }))
+  }
+
+  private showPeerMenu(id: string): void {
+    // 菜单项只能内联写：ArkTS 不允许把对象字面量拼成一个无类型数组再传
+    // （arkts-no-untyped-obj-literals），所以这里用「先弹、再按 index 分发」。
+    promptAction.showActionMenu({
+      title: id,
+      buttons: [
+        { text: '远程控制', color: '#E6EDF7' },
+        { text: '文件传输', color: '#E6EDF7' }
+      ]
+    }).then((res: promptAction.ActionMenuSuccessResponse) => {
+      if (res.index === 0) {
+        this.connect(id);
+      } else if (res.index === 1) {
+        this.openFiles(id);
+      }
+    }).catch(() => {});
   }
 
   // ======================= tab 1：连接 =======================
@@ -397,6 +439,16 @@ struct Home {
           .backgroundColor(Color.Transparent)
           .onChange((v: string) => { this.peerId = v; })
           .onSubmit(() => { this.connect(this.peerId); })
+
+        // 文件传输入口。放在「连接」左边而不是塞进菜单里：输入 ID 之后
+        // 最常见的第二个动作就是传文件，多一次长按不划算。
+        Text('📁')
+          .fontSize(18)
+          .padding({ left: 12, right: 12, top: 9, bottom: 9 })
+          .borderRadius(10)
+          .backgroundColor(C_FIELD)
+          .margin({ left: 8 })
+          .onClick(() => { this.openFiles(this.peerId); })
 
         Text(this.connecting ? '…' : '连接')
           .fontSize(16)
