@@ -30,6 +30,9 @@ const C_DIVIDER: string = '#1F2A3D';
 
 const URL_HOME: string = 'https://rustdesk.com/';
 const URL_PRIVACY: string = 'https://rustdesk.com/privacy.html';
+// 项目地址：GitHub 仓库就绪前先用 lx-soft.net 占位，仓库开好后替换成真实地址。
+const URL_PROJECT: string = 'https://lx-soft.net';
+const PROJECT_URL_LABEL: string = 'lx-soft.net';
 
 @Entry
 @Component
@@ -175,6 +178,22 @@ struct About {
             .width('100%')
             .padding({ top: 14, bottom: 14 })
             .onClick(() => { this.openUrl(URL_HOME); })
+
+            Divider().color(C_DIVIDER)
+
+            // 项目地址：仓库源码入口，点按复制网址（GitHub 地址待定）。
+            Row() {
+              Text('项目地址')
+                .fontSize(14)
+                .fontColor(C_TEXT)
+              Blank()
+              Text(PROJECT_URL_LABEL + ' ›')
+                .fontSize(13)
+                .fontColor(C_ACCENT)
+            }
+            .width('100%')
+            .padding({ top: 14, bottom: 14 })
+            .onClick(() => { this.openUrl(URL_PROJECT); })
 
             Divider().color(C_DIVIDER)
 
