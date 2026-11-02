@@ -114,24 +114,48 @@ pub fn download(remote_path: &str, local_to: &str) -> ResultType<i32> {
 
 /// 上传：本机 → 远端。
 ///
-/// `remote_dir` 是远端目标**目录**，条目名由 Rust 侧递归枚举后逐个拼上去。
+/// `remote_dir` 是远端目标**目录**。上游协议里 `to` 的语义是「接收端写文件的
+/// 基准路径」，而单文件任务的枚举条目 `entry.name` 是**空串**（见
+/// `fs.rs::read_dir_recursive` 的单文件分支，发送端读块时用 `p.file_name()`
+/// 补名，接收端没有对应补法，`validated_target(base, "")` 直接返回 base）。
+/// 所以单文件时必须把「目录 + 文件名」整条传过去，否则接收端会拿目录当
+/// 目标文件 —— 表现为：staging 文件（`<目录>.download`）创建在目标的**上级**
+/// 目录里（往往因权限直接失败），任务静默死亡，远端永远看不到文件。
+/// 目录/多文件任务的条目名是相对路径，`to` 保持目录本身即可。
 pub fn upload(local_path: &str, remote_dir: &str) -> ResultType<i32> {
     if local_path.trim().is_empty() {
         bail!("empty local path");
     }
+    if remote_dir.trim().is_empty() {
+        bail!("empty remote dir");
+    }
+    let is_file = std::fs::metadata(local_path)
+        .map(|m| m.is_file())
+        .unwrap_or(false);
+    let to = if is_file {
+        let name = std::path::Path::new(local_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| hbb_common::anyhow::anyhow!("local path has no file name"))?;
+        // 分隔符跟随远端路径风格：有 `\` 视为 Windows 风格，其余用 `/`。
+        let sep = if remote_dir.contains('\\') { '\\' } else { '/' };
+        format!("{}{}{}", remote_dir.trim_end_matches(['/', '\\']), sep, name)
+    } else {
+        remote_dir.to_owned()
+    };
     let s = sess()?;
     let id = fs::get_next_job_id();
     log::info!(
         "ohos: files upload id={} local='{}' -> '{}'",
         id,
         local_path,
-        remote_dir
+        to
     );
     s.send_files(
         id,
         0,
         local_path.to_owned(),
-        remote_dir.to_owned(),
+        to,
         0,
         false,
         false,

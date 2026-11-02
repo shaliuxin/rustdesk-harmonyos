@@ -318,6 +318,13 @@ struct SessionPage {
   private showRemoteCursor: boolean = false;
   private cursorEmbedded: boolean = true;
   private lastCursorUpdateTs: number = 0;
+  // 「切换到文件传输」标志：openFiles 已主动 closeSession 并 replaceUrl 去往
+  // FilePage；ArkUI 的 replaceUrl 是**先建新页、后销毁旧页**，本页的
+  // aboutToDisappear 会在 FilePage.aboutToAppear（内部 filesStart 建好 FS
+  // 会话）**之后**执行 —— 这里若再无条件 closeSession，就会把刚启动的文件
+  // 传输会话杀掉（日志特征：session start 后几十毫秒紧跟一条 session close，
+  // UI 永远停在「正在建立文件传输连接…」）。置位后跳过该次断开。
+  private switchingToFile: boolean = false;
 
   aboutToAppear(): void {
     const params: Record<string, Object> = router.getParams() as Record<string, Object>;
@@ -369,7 +376,11 @@ struct SessionPage {
     }
     // 离开页面就断开：手机上没有「后台保持会话」的语义，
     // 不断开的话 Rust 的 io_loop 线程会一直跑着。
-    RustDesk.closeSession();
+    // 例外：切换到文件传输页时，openFiles 已经断开过画面会话、FilePage
+    // 已建好新的 FS 会话，这里再断一次会把新会话误杀（见 switchingToFile 注释）。
+    if (!this.switchingToFile) {
+      RustDesk.closeSession();
+    }
   }
 
   private applyState(st: SessionState): void {
@@ -1668,6 +1679,9 @@ struct SessionPage {
       if (res.index !== 1) {
         return;
       }
+      // 先置标志再断开：本页销毁时（aboutToDisappear）不再重复 closeSession，
+      // 否则会把 FilePage 刚启动的文件传输会话杀掉。
+      this.switchingToFile = true;
       RustDesk.closeSession();
       router.replaceUrl({ url: 'pages/FilePage', params: { peerId: id } }).catch((e: Error) => {
         promptAction.showToast({ message: `打开文件传输失败：${e.message}` });
