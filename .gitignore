@@ -67,6 +67,7 @@ build-*.log
 /ohos/sysroot/
 /ohos/build/
 /ohos/build-x64/
+/ohos/build-a64/
 # 第三方源码：由 ohos/*.sh 下载/解压得到，不进 git（体积 >100M）。
 # ohos/third_party 下保留的是我们自己维护的 crate：magnum-opus、nix、rdev、socket2。
 /ohos/third_party/aom/

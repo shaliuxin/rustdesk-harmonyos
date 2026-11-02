@@ -302,9 +302,10 @@ DevEco 模拟器是 **x86_64**，真机/2in1 是 **arm64-v8a**。安装包 ABI �
 ### 10.2 构建顺序（每个架构各一遍）
 
 ```bash
-# 1) 三方 C 库
-bash ohos/build-libs-x64.sh          # x86_64；ONLY=vpx 可单步重跑
-sh   ohos/build-libsodium.sh         # aarch64 侧的 libsodium（其余原脚本）
+# 1) 三方 C 库（两架构各一个入口脚本，装到 ohos/sysroot/<arch>）
+bash ohos/build-libs-x64.sh                # x86_64（模拟器）：yuv/opus/aom/vpx/sodium；ONLY=<lib> 可单步重跑
+bash scripts/ohos/build-libs-aarch64.sh    # aarch64（真机）：yuv/opus/aom 走 CMake、vpx 复用源码树产物、
+                                         #   sodium 内部转调 ohos/build-libsodium.sh 再装到 sodium-link-aarch64
 
 # 2) Rust 静态库
 OHOS_TARGET=aarch64-unknown-linux-ohos bash scripts/ohos/build-core.sh release
