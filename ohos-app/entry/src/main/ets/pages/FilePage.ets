@@ -524,7 +524,10 @@ struct FilePage {
       fn(j);
       this.jobs.push(j);
     }
-    // 数组引用换新，触发 @State 重绘（元素是同一批对象，但字段已被就地改过）。
+    // 数组引用换新触发 @State 重新 diff。注意这还不够：ForEach 的 key 里
+    // 带 state/done/speed（见任务列表渲染处），字段变了 key 就变，条目才会
+    // 真正重建 —— 只换数组引用、key 不变的话 ArkUI 会认为该项没变，UI 永远
+    // 停在首帧（表现为进度一直是 0%，收起再展开才刷新）。
     this.jobs = this.jobs.slice();
   }
 
@@ -1348,7 +1351,7 @@ struct FilePage {
               }
             })
           }
-        }, (job: JobView) => `${job.id}`)
+        }, (job: JobView) => `${job.id}-${job.state}-${job.done}-${job.total}-${job.speed}`)
       }
       .width('100%')
       .height(this.jobs.length > 2 ? 168 : (this.jobs.length * 46 + 8))
