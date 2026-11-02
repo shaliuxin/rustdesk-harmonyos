@@ -90,12 +90,55 @@ uint32_t RotationToDegrees(NativeDisplayManager_Rotation r) {
     }
 }
 
+// OH_NativeDisplayManager_CreateAllDisplays / DestroyAllDisplays 是 API 14 引入
+// 的，而 minAPIVersion 是 12：API 12/13 的 libnative_display_manager.so 里没有
+// 这两个符号，静态引用会让加载 libentry.so 时直接解析失败（应用都起不来）。
+// 所以 dlsym 延迟绑定；拿不到（系统 < API 14）就走 RefreshDisplaysLocked 里的
+// 默认屏降级分支 —— 单屏设备本来也只有默认屏。
+typedef NativeDisplayManager_ErrorCode (*FnCreateAllDisplays)(
+    NativeDisplayManager_DisplaysInfo**);
+typedef void (*FnDestroyAllDisplays)(NativeDisplayManager_DisplaysInfo*);
+
+struct DisplayMultiApi {
+    bool ok = false;
+    FnCreateAllDisplays create = nullptr;
+    FnDestroyAllDisplays destroy = nullptr;
+};
+
+DisplayMultiApi ResolveDisplayMulti() {
+    static DisplayMultiApi api = []() -> DisplayMultiApi {
+        DisplayMultiApi a;
+        void* h = dlopen("libnative_display_manager.so", RTLD_NOW | RTLD_LOCAL);
+        if (h == nullptr) {
+            OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG,
+                         "dlopen libnative_display_manager.so failed: %{public}s "
+                         "(system < API 14, fallback to default display)",
+                         dlerror() ? dlerror() : "?");
+            return a;
+        }
+        a.create = reinterpret_cast<FnCreateAllDisplays>(
+            dlsym(h, "OH_NativeDisplayManager_CreateAllDisplays"));
+        a.destroy = reinterpret_cast<FnDestroyAllDisplays>(
+            dlsym(h, "OH_NativeDisplayManager_DestroyAllDisplays"));
+        a.ok = a.create != nullptr && a.destroy != nullptr;
+        if (!a.ok) {
+            OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG,
+                         "multi-display symbols not found (system < API 14)");
+        }
+        return a;
+    }();
+    return api;
+}
+
 void RefreshDisplaysLocked() {
     g_displays.clear();
     g_displays_valid = true;
 
     NativeDisplayManager_DisplaysInfo* all = nullptr;
-    NativeDisplayManager_ErrorCode rc = OH_NativeDisplayManager_CreateAllDisplays(&all);
+    const DisplayMultiApi dm = ResolveDisplayMulti();
+    NativeDisplayManager_ErrorCode rc = dm.ok
+        ? dm.create(&all)
+        : static_cast<NativeDisplayManager_ErrorCode>(-1);
     if (rc != DISPLAY_MANAGER_OK || all == nullptr) {
         // 多屏接口失败时退回默认屏。API 12 的机器只有默认屏接口，
         // 而且就算 API 26，某些精简设备也可能不支持多屏查询。
@@ -135,7 +178,9 @@ void RefreshDisplaysLocked() {
         out.name[sizeof(out.name) - 1] = '\0';
         g_displays.push_back(out);
     }
-    OH_NativeDisplayManager_DestroyAllDisplays(all);
+    if (dm.destroy != nullptr) {
+        dm.destroy(all);
+    }
 }
 
 // --- 采集 ----------------------------------------------------------------
@@ -307,6 +352,63 @@ void LogInjectResult(const char* what, int32_t rc, int32_t x, int32_t y) {
     }
 }
 
+// OH_Input_InjectMouseEventGlobal / SetMouseEventGlobalX/Y 是 API 20 引入的，
+// minAPIVersion 是 12：API 12~19 的 libohinput.so 没有这些符号，静态引用会让
+// 加载期解析失败。所以 Global 三个函数 dlsym 延迟绑定；系统 < API 20 时回退
+// since 12 的 OH_Input_InjectMouseEvent（屏内坐标）。单屏设备全局坐标 == 屏幕
+// 坐标，行为一致；多屏只在 API 20+ 上才有 Global 版本可用。
+typedef void (*FnSetMouseEventGlobalX)(struct Input_MouseEvent*, int32_t);
+typedef void (*FnSetMouseEventGlobalY)(struct Input_MouseEvent*, int32_t);
+typedef int32_t (*FnInjectMouseEventGlobal)(const struct Input_MouseEvent*);
+
+struct MouseGlobalApi {
+    bool ok = false;
+    FnSetMouseEventGlobalX setX = nullptr;
+    FnSetMouseEventGlobalY setY = nullptr;
+    FnInjectMouseEventGlobal inject = nullptr;
+};
+
+MouseGlobalApi ResolveMouseGlobal() {
+    static MouseGlobalApi api = []() -> MouseGlobalApi {
+        MouseGlobalApi a;
+        void* h = InputLibHandle();
+        if (h == nullptr) {
+            return a;
+        }
+        a.setX = reinterpret_cast<FnSetMouseEventGlobalX>(
+            dlsym(h, "OH_Input_SetMouseEventGlobalX"));
+        a.setY = reinterpret_cast<FnSetMouseEventGlobalY>(
+            dlsym(h, "OH_Input_SetMouseEventGlobalY"));
+        a.inject = reinterpret_cast<FnInjectMouseEventGlobal>(
+            dlsym(h, "OH_Input_InjectMouseEventGlobal"));
+        a.ok = a.setX != nullptr && a.setY != nullptr && a.inject != nullptr;
+        if (!a.ok) {
+            OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG,
+                         "global mouse injection not found (system < API 20), "
+                         "fallback to display-coordinate injection");
+        }
+        return a;
+    }();
+    return api;
+}
+
+// 调用方负责 SetMouseEventAction/Button/Axis 等；坐标由这里统一设。
+// Global 可用时同设 display 与 global 坐标（API 20 的 Global 注入按全局
+// 坐标校验，不设会被当作无效值返回 401）。
+int32_t InjectMouseEventCompat(struct Input_MouseEvent* ev, int32_t x, int32_t y) {
+    const MouseGlobalApi g = ResolveMouseGlobal();
+    if (g.ok) {
+        OH_Input_SetMouseEventDisplayX(ev, x);
+        OH_Input_SetMouseEventDisplayY(ev, y);
+        g.setX(ev, x);
+        g.setY(ev, y);
+        return g.inject(ev);
+    }
+    OH_Input_SetMouseEventDisplayX(ev, x);
+    OH_Input_SetMouseEventDisplayY(ev, y);
+    return OH_Input_InjectMouseEvent(ev);
+}
+
 }  // namespace
 
 /// 触发系统授权弹窗。返回 0 表示「已在授权流程中」或「已授权」。
@@ -376,12 +478,8 @@ int32_t ohos_input_inject_mouse_move(int32_t x, int32_t y) {
     }
     OH_Input_SetMouseEventDisplayX(ev, x);
     OH_Input_SetMouseEventDisplayY(ev, y);
-    // Global 注入按全局坐标系校验（IsValidGlobalXY）：不设 globalX/Y 会被当作
-    // 无效值直接返回 INPUT_PARAMETER_ERROR(401)。单屏设备全局坐标 == 显示坐标。
-    OH_Input_SetMouseEventGlobalX(ev, x);
-    OH_Input_SetMouseEventGlobalY(ev, y);
     OH_Input_SetMouseEventActionTime(ev, NowMicros());
-    int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
+    int32_t rc = InjectMouseEventCompat(ev, x, y);
     OH_Input_DestroyMouseEvent(&ev);
     LogInjectResult("move", rc, x, y);
     return rc;
@@ -396,10 +494,8 @@ int32_t ohos_input_inject_mouse_button(int32_t button, int32_t down, int32_t x, 
     OH_Input_SetMouseEventButton(ev, button);
     OH_Input_SetMouseEventDisplayX(ev, x);
     OH_Input_SetMouseEventDisplayY(ev, y);
-    OH_Input_SetMouseEventGlobalX(ev, x);
-    OH_Input_SetMouseEventGlobalY(ev, y);
     OH_Input_SetMouseEventActionTime(ev, NowMicros());
-    int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
+    int32_t rc = InjectMouseEventCompat(ev, x, y);
     OH_Input_DestroyMouseEvent(&ev);
     g_pressed_button.store(down != 0 ? button : -1, std::memory_order_relaxed);
     LogInjectResult(down != 0 ? "button-down" : "button-up", rc, x, y);
@@ -415,12 +511,10 @@ static int32_t InjectAxisStep(int32_t action, int32_t x, int32_t y, float value,
     OH_Input_SetMouseEventAction(ev, action);
     OH_Input_SetMouseEventDisplayX(ev, x);
     OH_Input_SetMouseEventDisplayY(ev, y);
-    OH_Input_SetMouseEventGlobalX(ev, x);
-    OH_Input_SetMouseEventGlobalY(ev, y);
     OH_Input_SetMouseEventAxisType(ev, MOUSE_AXIS_SCROLL_VERTICAL);
     OH_Input_SetMouseEventAxisValue(ev, value);
     OH_Input_SetMouseEventActionTime(ev, NowMicros());
-    int32_t rc = OH_Input_InjectMouseEventGlobal(ev);
+    int32_t rc = InjectMouseEventCompat(ev, x, y);
     OH_Input_DestroyMouseEvent(&ev);
     LogInjectResult(what, rc, x, y);
     if (action == MOUSE_ACTION_AXIS_UPDATE) {

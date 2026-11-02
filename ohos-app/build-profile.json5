@@ -12,6 +12,10 @@
 //
 // compatibleSdkVersion 与本机 SDK 对齐。如果你装的不是 API 26，只改这一行
 // （例如 '5.0.5(17)'），其余不用动。
+// 兼容下限已降到 HarmonyOS 5.0.0（API 12，HarmonyOS NEXT 首个商用版本）：
+// native 层所有 12 以上的 NDK 符号（InjectMouseEventGlobal=20、
+// CreateAllDisplays=14、RequestInjection=20）都走 dlsym 延迟绑定并带降级，
+// 见 entry/src/main/cpp/ohos_abi.cpp；ArkTS 层未用 12 以上的接口。
 {
   app: {
     signingConfigs: [
@@ -33,7 +37,7 @@
       {
         name: 'default',
         signingConfig: 'default',
-        compatibleSdkVersion: '26.0.0',
+        compatibleSdkVersion: '5.0.0(12)',
         runtimeOS: 'HarmonyOS',
         buildOption: {
           strictMode: {
