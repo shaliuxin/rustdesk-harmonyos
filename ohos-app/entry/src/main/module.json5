@@ -43,16 +43,22 @@
           "abilities": ["EntryAbility"],
           "when": "always"
         }
+      },
+      // 剪贴板同步（本机 → 远端）：读剪贴板必须申请 READ_PASTEBOARD。
+      // 它是 system_basic 级 user_grant 权限，除声明外还需要：
+      //   1. 在 AGC「ACL 权限」页申请并获取该受限权限（说明远程桌面场景）；
+      //   2. 创建调试 Profile 时勾选「受限ACL权限(HarmonyOS API9及以上)」；
+      //   3. 用带 ACL 的 Profile 签名，否则安装即报 9568289。
+      // 没有 ACL Profile 的环境里 SessionPage 会降级成 PasteButton 安全控件
+      // （点击临时免权读取，无需任何签名配置），功能可用只是要手动点一下。
+      {
+        "name": "ohos.permission.READ_PASTEBOARD",
+        "reason": "$string:reason_pasteboard",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
       }
-      // 剪贴板读取（READ_PASTEBOARD）**故意不声明**：
-      // 它是 system_basic 级 user_grant，签名 profile 必须带 ACL
-      // （acls.allowed-acls），没配 ACL 时安装直接被拒（9568289）。
-      // 当前签名链路（DevEco 自动签名 / AGC 发布 profile）都没有 ACL，
-      // 所以读方向降级为 PasteButton 安全控件：用户点一下即获得临时
-      // 免权读取窗口（官方机制，无需声明、无需 ACL）。
-      // 若日后在 AGC 申请到 ACL，把 READ_PASTEBOARD 加回 requestPermissions
-      // 并恢复 SessionPage.requestPastePermission 的自动同步路径即可
-      // （代码已就位，删掉这段注释重新声明就能装）。
     ]
   }
 }

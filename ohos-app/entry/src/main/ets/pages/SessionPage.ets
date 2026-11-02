@@ -428,7 +428,9 @@ struct SessionPage {
       if (change === this.lastClipboardChange) {
         return;
       }
-      // 无权限时读会抛 201；捕获后降级到 PasteButton，别反复弹。
+      // 无权限时读**不会抛 201**，而是返回空的 PasteData（pasteboard 服务
+      // 日志 ProcessPasteData# Invalid raw data size:0 实测如此），所以这里
+      // 靠「changeCount 变了却读不到非空文本」判定被管控，降级 PasteButton。
       let text: string = '';
       try {
         const data: pasteboard.PasteData = pb.getDataSync();
@@ -444,8 +446,14 @@ struct SessionPage {
         return;
       }
       if (text.length === 0 || text === this.lastClipboardText) {
-        // 与上次同步内容相同：可能是自己的写入被 changeCount 拦截失败后落到这里。
+        // 与上次同步内容相同：可能是自己的写入被 changeCount 拦截后落到这里。
         this.lastClipboardChange = change;
+        // 变化计数确实前进了却读不到内容 = 被权限管控成空数据，
+        // 自动同步这条路走不通，把 PasteButton 兜底亮出来。
+        if (text.length === 0 && !this.pasteBlocked) {
+          this.pasteBlocked = true;
+          hilog.warn(DOMAIN, TAG, 'clipboard read returns empty (permission gated), fallback to PasteButton');
+        }
         return;
       }
       this.lastClipboardText = text;
@@ -490,9 +498,9 @@ struct SessionPage {
         if (res !== undefined && res.authResults !== undefined) {
           granted = res.authResults.every((r: number) => r === 0);
         }
-        if (granted) {
-          this.pasteBlocked = false;
-        }
+        // resolve 但没授权（权限未声明 / 用户拒绝）也要进兜底，
+        // 否则 PasteButton 永远不出现、自动同步又静默失败。
+        this.pasteBlocked = !granted;
         hilog.info(DOMAIN, TAG, 'READ_PASTEBOARD granted=%{public}s', `${granted}`);
       }).catch(() => {
         // 无 ACL：弹窗根本出不来，直接进 PasteButton 兜底。
