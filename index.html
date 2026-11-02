@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RemoteDesk 隐私政策</title>
+<style>
+  body { font-family: "HarmonyOS Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-width: 860px; margin: 0 auto; padding: 24px 20px 64px;
+         color: #1c2333; background: #fff; line-height: 1.75; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  .date { color: #7a8194; font-size: 14px; margin-bottom: 28px; }
+  .summary { background: #eef4ff; border-left: 4px solid #0071ff;
+             padding: 14px 16px; border-radius: 8px; margin-bottom: 28px; }
+  h2 { font-size: 18px; margin-top: 32px; }
+  p, li { font-size: 15px; }
+  footer { margin-top: 48px; color: #9aa1b2; font-size: 12px;
+           border-top: 1px solid #e8eaf0; padding-top: 16px; }
+</style>
+</head>
+<body>
+
+<h1>RemoteDesk 隐私政策</h1>
+<div class="date">生效日期：2026 年 11 月 2 日</div>
+
+<div class="summary"><strong>简单说：本应用不收集你的任何个人信息，所有数据只留在你的设备上。</strong></div>
+
+<h2>一、我们收集哪些信息</h2>
+<p>本应用不收集、不上传任何个人身份信息，也不含广告、统计分析或崩溃上报 SDK。</p>
+<p>应用运行时产生的全部数据（服务器配置、连接记录、收藏、密钥）都保存在你设备的应用私有目录中，只有你自己能访问。卸载应用即随之删除。</p>
+
+<h2>二、设备 ID 与连接信息</h2>
+<p>应用会生成一个随机的设备 ID（由 RustDesk 协议规定），并注册到你自行配置的 ID 服务器，用于让其他设备找到你。该 ID 是随机字符串，不含你的姓名、手机号或账号信息。</p>
+<p>建立远程连接时，对端设备可以看到你的设备 ID、主机名和操作系统类型——这是完成连接所必需的信息。如果你不希望暴露主机名，可在系统设置中修改设备名称。</p>
+
+<h2>三、权限使用说明</h2>
+<ul>
+<li><strong>网络访问（ohos.permission.INTERNET）</strong>：用于连接远程设备、传输屏幕画面与文件。</li>
+<li><strong>获取网络信息（ohos.permission.GET_NETWORK_INFO）</strong>：用于判断当前网络环境，以选择直连或中继线路，提升连接成功率。</li>
+</ul>
+<p>除上述两项外，本应用不申请通讯录、位置、相册、麦克风、摄像头等任何其他权限。</p>
+
+<h2>四、屏幕画面与键鼠输入</h2>
+<p>远程会话中的屏幕画面、鼠标键盘输入只在你与被控设备之间传输。传输采用端到端加密（NaCl 加密 + 密钥交换），中继服务器只转发加密后的数据流，无法解密其内容。</p>
+<p>画面不会被录制、截屏留存或上传到任何第三方。</p>
+
+<h2>五、文件传输</h2>
+<p>文件传输只在你主动选择文件并点击上传/下载时发生，传输路径为设备之间（直连或经你配置的中继服务器）。应用本身不留存、不转存任何传输内容。</p>
+<p>接收到的文件保存在你指定的目录中；下载过程中的临时文件会在完成后自动清理。</p>
+
+<h2>六、剪贴板</h2>
+<p>远程会话期间，剪贴板内容会在你与被控设备之间同步，以便复制粘贴文本。该同步仅在会话进行中生效，会话结束后立即停止，内容不做任何留存。</p>
+
+<h2>七、第三方服务</h2>
+<p>本应用是开源项目 RustDesk 的鸿蒙衍生客户端。ID 服务器与中继服务器地址由你自行填写：</p>
+<ul>
+<li>使用你自建的服务器时，数据仅经过你自己的服务器；</li>
+<li>使用第三方公共服务器时，该服务器的运营方可能记录连接元数据（IP、设备 ID、连接时间），其行为受该服务方的隐私政策约束，与本应用无关。</li>
+</ul>
+<p>本应用不内置任何第三方统计、推送或广告服务。</p>
+
+<h2>八、未成年人保护</h2>
+<p>本应用为远程桌面工具，不面向未成年人设计，也不会主动收集未成年人的任何信息。未成年人应在监护人指导下使用。</p>
+
+<h2>九、你的权利</h2>
+<p>你可以随时：</p>
+<ul>
+<li>在「设置」中清除服务器配置、收藏与连接记录；</li>
+<li>卸载应用，一次性删除全部本地数据；</li>
+<li>停止使用，无需任何申请流程。</li>
+</ul>
+<p>由于本应用不收集服务器侧的个人数据，因此不存在需要向开发者申请导出或删除的账户数据。</p>
+
+<h2>十、政策更新</h2>
+<p>本政策可能随功能变化而更新，最新版本随应用一起发布，并在本页顶部标注生效日期。若涉及数据收集范围的实质性变化，会在应用内显著提示。</p>
+
+<h2>十一、联系我们</h2>
+<p>对本政策有任何疑问，可通过项目仓库提交 Issue：<br>
+<a href="https://github.com/shaliuxin/rustdesk-harmonyos">github.com/shaliuxin/rustdesk-harmonyos</a></p>
+
+<footer>
+本应用基于开源项目 RustDesk（AGPL-3.0）构建，与 RustDesk 官方无隶属关系。<br>
+Copyright (c) 2026 shaliuxin
+</footer>
+
+</body>
+</html>
