@@ -51,14 +51,26 @@
       //   3. 用带 ACL 的 Profile 签名，否则安装即报 9568289。
       // 没有 ACL Profile 的环境里 SessionPage 会降级成 PasteButton 安全控件
       // （点击临时免权读取，无需任何签名配置），功能可用只是要手动点一下。
-      {
-        "name": "ohos.permission.READ_PASTEBOARD",
-        "reason": "$string:reason_pasteboard",
-        "usedScene": {
-          "abilities": ["EntryAbility"],
-          "when": "inuse"
-        }
-      }
+      // 剪贴板本机→远端：当前用 PasteButton 安全控件（点击临时免权读取），
+// 不声明 READ_PASTEBOARD。该权限是 system_basic 级，声明了就必须在
+// 签名 profile 的 acls.allowed-acls 里有对应 ACL，否则安装被拒(9568289)、
+// AGC 上传也会因 profile 权限不一致被拒。等 ACL 申请获批后，重建 Profile
+// （勾「受限ACL权限」）并取消下面注释重新编译，即可升级为全自动双向同步
+// （SessionPage 里的 requestPastePermission / onPasteboardUpdate 路径已就位）。
+// // 剪贴板本机→远端：当前用 PasteButton 安全控件（点击临时免权读取），
+// 不声明 READ_PASTEBOARD。该权限是 system_basic 级，声明了就必须在
+// 签名 profile 的 acls.allowed-acls 里有对应 ACL，否则安装被拒(9568289)、
+// AGC 上传也会因 profile 权限不一致被拒。等 ACL 申请获批后，重建 Profile
+// （勾「受限ACL权限」）并取消下面注释重新编译，即可升级为全自动双向同步
+// （SessionPage 里的 requestPastePermission / onPasteboardUpdate 路径已就位）。
+// {
+// //         "name": "ohos.permission.READ_PASTEBOARD",
+// //         "reason": "$string:reason_pasteboard",
+// //         "usedScene": {
+// //           "abilities": ["EntryAbility"],
+// //           "when": "inuse"
+// //         }
+// //       }
     ]
   }
 }
