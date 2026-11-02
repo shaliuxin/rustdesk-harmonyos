@@ -14,9 +14,9 @@ import { RustDesk } from './RustDesk';
  *                     常量（经 native.version() 读回），**不在这里手写** ——
  *                     上游一升级、重编，这里自动跟着变。
  *
- * 最终展示形态：`0.1.1 (1.5.1) for HarmonyOS`
+ * 最终展示形态：`0.1.2 (1.5.1) for HarmonyOS`
  */
-export const OHOS_APP_VERSION: string = '0.1.1';
+export const OHOS_APP_VERSION: string = '0.1.2';
 
 /** 产品后缀，接在版本串末尾。 */
 export const VERSION_SUFFIX: string = 'for HarmonyOS';
