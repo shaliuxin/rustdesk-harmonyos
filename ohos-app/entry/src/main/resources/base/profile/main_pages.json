@@ -4,6 +4,7 @@
     "pages/SessionPage",
     "pages/FilePage",
     "pages/About",
+    "pages/Privacy",
     "pages/Scan"
   ]
 }

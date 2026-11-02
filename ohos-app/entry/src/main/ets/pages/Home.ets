@@ -2,6 +2,8 @@ import { router } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { preferences } from '@kit.ArkData';
+import { common } from '@kit.AbilityKit';
 import { RustDesk, PeerInfo, UiEvent, ChatEventData } from '../common/RustDesk';
 import { isPhoneForm } from '../common/DeviceForm';
 import { SettingsPage } from './Settings';
@@ -45,6 +47,11 @@ const DOT_FAILED: string = '#EF4444';     // 红：连接失败
 const DOMAIN: number = 0x3200;
 const TAG: string = 'RustDeskHome';
 
+// 隐私政策的同意状态。应用市场审核要求首次启动展示并取得同意，
+// 只存一个布尔值，键名带版本号便于将来条款实质变更时重新征询。
+const PRIVACY_STORE: string = 'app_prefs';
+const PRIVACY_KEY: string = 'privacy_accepted_v1';
+
 @Entry
 @Component
 struct Home {
@@ -57,6 +64,9 @@ struct Home {
   // 0 = 最近会话，1 = 收藏（对应 Android PeerTabPage 的两个页签）
   @State peersTab: number = 0;
   @State connecting: boolean = false;
+
+  // 首次启动的隐私政策同意遮罩（见 privacyMask / checkPrivacy）。
+  @State showPrivacy: boolean = false;
 
   // --- 共享屏幕页 ---
   @State myId: string = '';
@@ -100,6 +110,7 @@ struct Home {
   aboutToAppear(): void {
     this.isPhone = isPhoneForm();
     this.refresh();
+    this.checkPrivacy();
 
     // 远程协助：只在支持的形态上初始化（2in1）
     this.hostSupported = !this.isPhone && RustDesk.hostSupported();
@@ -116,6 +127,107 @@ struct Home {
     // 被控端聊天：主控发来的消息由 Rust 侧转成 'host_chat' 事件。
     // 会话页只在主控时注册，被控端一直停在首页，必须这里接。
     RustDesk.on(this.onHostEvent);
+  }
+
+  // --- 隐私政策同意 ---------------------------------------------------------
+  //
+  // 应用市场审核硬要求：首次启动必须能展示隐私政策并取得用户同意。
+  // 同意状态存 Preferences，此后不再打扰；条款实质变更时把 PRIVACY_KEY
+  // 的版本号提升，用户会再被征询一次。
+
+  private checkPrivacy(): void {
+    try {
+      const ctx: common.UIAbilityContext =
+        getContext(this) as common.UIAbilityContext;
+      const p = preferences.getPreferencesSync(ctx, { name: PRIVACY_STORE });
+      const accepted = p.getSync(PRIVACY_KEY, false) as boolean;
+      this.showPrivacy = !accepted;
+    } catch (e) {
+      // 读不到（首次安装、存储异常）就当作未同意，宁可多问一次。
+      this.showPrivacy = true;
+    }
+  }
+
+  private acceptPrivacy(): void {
+    try {
+      const ctx: common.UIAbilityContext =
+        getContext(this) as common.UIAbilityContext;
+      const p = preferences.getPreferencesSync(ctx, { name: PRIVACY_STORE });
+      p.putSync(PRIVACY_KEY, true);
+      p.flush();
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'save privacy ack failed');
+    }
+    this.showPrivacy = false;
+  }
+
+  // 不同意就退出：不进入任何功能，避免「不同意但仍在使用」的合规瑕疵。
+  private rejectPrivacy(): void {
+    try {
+      const ctx: common.UIAbilityContext =
+        getContext(this) as common.UIAbilityContext;
+      ctx.terminateSelf();
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'terminateSelf failed');
+    }
+  }
+
+  @Builder
+  privacyMask() {
+    Column() {
+      Column() {
+        Text('隐私政策')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(C_TEXT)
+          .width('100%')
+          .margin({ bottom: 12 })
+        Text('RemoteDesk 是基于开源 RustDesk 的远程桌面工具。\n\n'
+          + '我们不收集你的个人信息，也不向第三方提供任何数据。'
+          + '设备 ID、服务器配置与连接记录只保存在本机；'
+          + '远程画面与文件在设备之间端到端加密传输。\n\n'
+          + '请阅读并同意《隐私政策》后继续使用。')
+          .fontSize(14)
+          .fontColor(C_DIM)
+          .lineHeight(22)
+          .width('100%')
+        Text('查看完整隐私政策 ›')
+          .fontSize(13)
+          .fontColor(C_ACCENT)
+          .width('100%')
+          .textAlign(TextAlign.End)
+          .padding({ top: 10, bottom: 4 })
+          .onClick(() => { router.pushUrl({ url: 'pages/Privacy' }); })
+        Row() {
+          Button('不同意')
+            .fontSize(15)
+            .fontColor(C_DIM)
+            .backgroundColor(C_FIELD)
+            .layoutWeight(1)
+            .height(44)
+            .onClick(() => { this.rejectPrivacy(); })
+          Button('同意并继续')
+            .fontSize(15)
+            .fontColor('#FFFFFF')
+            .backgroundColor(C_ACCENT)
+            .layoutWeight(1)
+            .height(44)
+            .margin({ left: 12 })
+            .onClick(() => { this.acceptPrivacy(); })
+        }
+        .width('100%')
+        .margin({ top: 14 })
+      }
+      .width('86%')
+      .padding(22)
+      .backgroundColor(C_CARD)
+      .borderRadius(16)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('#CC000000')
   }
 
   // 只在值真的变了才写状态：@State 每次赋值都会触发重渲染。
@@ -906,10 +1018,13 @@ struct Home {
   // ======================= 主体 =======================
 
   build() {
+    // 外层 Stack 只为首次启动的隐私政策遮罩：它要盖在整个界面之上，
+    // 且不参与 Tabs 布局（用 bindSheet 可被手势关闭，不适合强制同意）。
+    Stack() {
     Column() {
       // AppBar：Android 是居中标题 + 右侧动作。这里放一个刷新（回读 ID/密码/列表）。
       Row() {
-        Text('RustDesk')
+        Text('RemoteDesk')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor(C_TEXT)
@@ -971,6 +1086,14 @@ struct Home {
       title: { title: '聊天' },
       onDisappear: () => { this.hostChatOpen = false; }
     })
+
+      // 首次启动：未同意隐私政策前，遮罩挡在所有功能之上。
+      if (this.showPrivacy) {
+        this.privacyMask();
+      }
+    }
+    .width('100%')
+    .height('100%')
   }
 }
 

@@ -29,7 +29,8 @@ const C_DIVIDER: string = '#1F2A3D';
 // 前半段是鸿蒙版自己的版本基数，括号里是上游 RustDesk 的核心版本。
 
 const URL_HOME: string = 'https://rustdesk.com/';
-const URL_PRIVACY: string = 'https://rustdesk.com/privacy.html';
+// 隐私政策走应用内页面（pages/Privacy.ets），不再指向外部网页 ——
+// 应用市场要求应用内可查看，外链在离线/无浏览器时等于没有。
 // 项目地址：GitHub 仓库就绪前先用 lx-soft.net 占位，仓库开好后替换成真实地址。
 const URL_PROJECT: string = 'https://github.com/shaliuxin/rustdesk-harmonyos';
 const PROJECT_URL_LABEL: string = 'github.com/shaliuxin/rustdesk-harmonyos';
@@ -137,12 +138,12 @@ struct About {
         Column() {
           // --- 品牌区 ---
           Column() {
-            Text('RustDesk')
+            Text('RemoteDesk')
               .fontSize(28)
               .fontWeight(FontWeight.Bold)
               .fontColor(C_ACCENT)
               .margin({ bottom: 6 })
-            Text('开源远程桌面 · 鸿蒙主控端')
+            Text('基于开源 RustDesk · 鸿蒙远程桌面')
               .fontSize(13)
               .fontColor(C_DIM)
           }
@@ -208,7 +209,9 @@ struct About {
             }
             .width('100%')
             .padding({ top: 14, bottom: 14 })
-            .onClick(() => { this.openUrl(URL_PRIVACY); })
+            // 走应用内页面而不是外链：应用市场审核要求「应用内可查看隐私政策」，
+            // 甩给浏览器在离线或未装浏览器时就等于没有。
+            .onClick(() => { router.pushUrl({ url: 'pages/Privacy' }); })
 
             Divider().color(C_DIVIDER)
 
@@ -230,8 +233,8 @@ struct About {
           .borderRadius(13)
           .margin({ bottom: 20 })
 
-          Text('鸿蒙版目前只实现了主控端（去连别人的设备）。\n'
-            + '被控端服务、文件传输、终端与摄像头尚未启用。')
+          Text('RemoteDesk 是基于开源 RustDesk 的鸿蒙远程桌面客户端。\n'
+            + '支持远程控制、文件传输与共享屏幕（平板/PC 形态）。')
             .fontSize(12)
             .fontColor(C_FAINT)
             .lineHeight(18)

@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "RustDesk 远程桌面"
+      "value": "RemoteDesk 远程桌面"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "RustDesk 远程桌面"
+      "value": "RemoteDesk 远程桌面"
     },
     {
       "name": "EntryAbility_label",
-      "value": "RustDesk"
+      "value": "RemoteDesk"
     },
     {
       "name": "reason_internet",
