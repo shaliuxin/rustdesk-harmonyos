@@ -16,7 +16,7 @@ import { RustDesk } from './RustDesk';
  *
  * 最终展示形态：`0.1.4 (1.5.1) for HarmonyOS`
  */
-export const OHOS_APP_VERSION: string = '0.1.4';
+export const OHOS_APP_VERSION: string = '0.1.5';
 
 /** 产品后缀，接在版本串末尾。 */
 export const VERSION_SUFFIX: string = 'for HarmonyOS';
