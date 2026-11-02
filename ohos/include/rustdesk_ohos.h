@@ -144,6 +144,11 @@ int32_t rustdesk_ohos_ctrl_alt_del(void);
 // 不受两端键位布局影响，中文/符号也能用；空串直接返回 0。
 int32_t rustdesk_ohos_text(const char *text);
 
+// 把本机剪贴板文本发给对端（ArkTS pasteboard on('update') 回调）。
+// 构造 MultiClipboards（纯文本，超阈值压缩）发给当前会话；
+// 仅查看/剪贴板禁用/无会话时返回负数，调用方应静默忽略。
+int32_t rustdesk_ohos_clipboard_send(const char *text);
+
 int32_t rustdesk_ohos_switch_display(int32_t index);
 
 // 代理设置（JSON），形如 {"proxy":"","username":"","password":""}。

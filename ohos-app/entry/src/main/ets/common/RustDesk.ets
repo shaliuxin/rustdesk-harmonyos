@@ -672,6 +672,15 @@ export class RustDesk {
     return native.text(value);
   }
 
+  // 把本机剪贴板文本发给对端（pasteboard on('update') 回调用）。
+  // 返回 0 表示已发出；负数 = 无会话 / 仅查看 / 剪贴板被禁用，调用方静默忽略。
+  static clipboardSend(value: string): number {
+    if (value.length === 0) {
+      return 0;
+    }
+    return native.clipboardSend(value);
+  }
+
   // --- 渲染控制 -----------------------------------------------------------
 
   static setRenderActive(active: boolean): void {

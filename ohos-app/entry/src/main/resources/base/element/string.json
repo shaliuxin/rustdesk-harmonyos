@@ -19,6 +19,10 @@
     {
       "name": "reason_network_info",
       "value": "用于判断当前网络类型以选择直连或中继"
+    },
+    {
+      "name": "reason_pasteboard",
+      "value": "远程桌面连接期间读取本机剪贴板，以便把复制的内容同步到远端设备"
     }
   ]
 }

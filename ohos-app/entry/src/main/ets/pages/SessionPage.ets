@@ -4,6 +4,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import {
   RustDesk, UiEvent, DisplayEventData, CloseEventData,
   BlockInputEventData, MsgboxEventData, SessionState, RemoteDisplay,
@@ -360,10 +361,15 @@ struct SessionPage {
     // 所以先读一次状态快照，不能只依赖事件。
     const st: SessionState = RustDesk.state();
     this.applyState(st);
+
+    // 剪贴板同步：监听本机剪贴板变化（读内容仍受权限管控），并静默申请授权。
+    pasteboard.getSystemPasteboard().on('update', this.onPasteboardUpdate);
+    this.requestPastePermission();
   }
 
   aboutToDisappear(): void {
     RustDesk.off(this.onCoreEvent);
+    pasteboard.getSystemPasteboard().off('update', this.onPasteboardUpdate);
     this.clearLongPress();
     this.clearAutoUp();
     // 拖动中直接离开页面（按返回、弹窗抢焦点）时左键会停在按下状态，
@@ -392,6 +398,137 @@ struct SessionPage {
     if (d !== undefined && d.w > 0 && d.h > 0) {
       this.remoteW = d.w;
       this.remoteH = d.h;
+    }
+  }
+
+  // --- 剪贴板双向同步 -----------------------------------------------------
+  //
+  // 远端 → 本机：Rust 收到 Clipboard/MultiClipboards 后 emit('clipboard')，
+  //   这里写 pasteboard（写不需要任何权限）。
+  // 本机 → 远端：systemPasteboard.on('update') 监听变化，读到纯文本后
+  //   RustDesk.clipboardSend() 发出。**读**需要 ohos.permission.READ_PASTEBOARD
+  //   （system_basic + ACL），签名 profile 没配 ACL 时授权弹窗会直接失败，
+  //   此时 pasteBlocked = true，顶栏显示 PasteButton 安全控件兜底——
+  //   用户点一下即可临时免权读取（免权窗口到灭屏/切后台为止）。
+  //
+  // 防回环：远端内容写入本机剪贴板会再次触发 on('update')，若不拦截就会
+  // 把同一份内容发回去、对端再写回来……三层防线：
+  //   1. lastClipboardText：内容级去重（写入前就更新，不依赖时序）；
+  //   2. lastClipboardChange：自己写入时的 changeCount，事件先到也不会误判；
+  //   3. Rust 侧 disable_clipboard / view_only 时 clipboardSend 直接拒绝。
+  private lastClipboardText: string = '';
+  private lastClipboardChange: number = -1;
+  @State pasteBlocked: boolean = false;
+
+  private onPasteboardUpdate = (): void => {
+    try {
+      const pb: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+      // 自己写进去的变化直接跳过（读到内容也相同，这里先省一次权限调用）。
+      const change: number = pb.getChangeCount();
+      if (change === this.lastClipboardChange) {
+        return;
+      }
+      // 无权限时读会抛 201；捕获后降级到 PasteButton，别反复弹。
+      let text: string = '';
+      try {
+        const data: pasteboard.PasteData = pb.getDataSync();
+        if (data !== undefined && data.getPrimaryText() !== undefined) {
+          text = data.getPrimaryText();
+        }
+      } catch (e) {
+        if (!this.pasteBlocked) {
+          this.pasteBlocked = true;
+          hilog.warn(DOMAIN, TAG, 'clipboard read denied (%{public}s), fallback to PasteButton',
+            (e as BusinessError).code !== undefined ? `${(e as BusinessError).code}` : '?');
+        }
+        return;
+      }
+      if (text.length === 0 || text === this.lastClipboardText) {
+        // 与上次同步内容相同：可能是自己的写入被 changeCount 拦截失败后落到这里。
+        this.lastClipboardChange = change;
+        return;
+      }
+      this.lastClipboardText = text;
+      this.lastClipboardChange = change;
+      const rc: number = RustDesk.clipboardSend(text);
+      hilog.info(DOMAIN, TAG, 'clipboard send rc=%{public}d len=%{public}d', rc, text.length);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'onPasteboardUpdate failed');
+    }
+  };
+
+  // 远端 → 本机。setData 无需权限；lastClipboardText 在写入前更新，
+  // 即使 update 事件先于 setData 的 then 回调到达也不会回发。
+  private onRemoteClipboard(text: string): void {
+    if (text.length === 0) {
+      return;
+    }
+    this.lastClipboardText = text;
+    try {
+      const pb: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+      const data: pasteboard.PasteData = pasteboard.createData(
+        pasteboard.MIMETYPE_TEXT_PLAIN, text);
+      pb.setData(data).then(() => {
+        this.lastClipboardChange = pb.getChangeCount();
+      }).catch(() => {
+        hilog.warn(DOMAIN, TAG, 'clipboard setData failed');
+      });
+      hilog.info(DOMAIN, TAG, 'clipboard from remote, len=%{public}d', text.length);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'clipboard setData throw');
+    }
+  }
+
+  // 进入会话时静默请求剪贴板读取授权（有 ACL 才会真正弹系统弹窗）。
+  private requestPastePermission(): void {
+    try {
+      const atManager = abilityAccessCtrl.createAtManager();
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const list: Permissions[] = ['ohos.permission.READ_PASTEBOARD'];
+      atManager.requestPermissionsFromUser(ctx, list).then((res) => {
+        let granted: boolean = false;
+        if (res !== undefined && res.authResults !== undefined) {
+          granted = res.authResults.every((r: number) => r === 0);
+        }
+        if (granted) {
+          this.pasteBlocked = false;
+        }
+        hilog.info(DOMAIN, TAG, 'READ_PASTEBOARD granted=%{public}s', `${granted}`);
+      }).catch(() => {
+        // 无 ACL：弹窗根本出不来，直接进 PasteButton 兜底。
+        this.pasteBlocked = true;
+      });
+    } catch (e) {
+      this.pasteBlocked = true;
+    }
+  }
+
+  // PasteButton 安全控件的点击回调：临时免权窗口内读取并发送。
+  private pasteFromButton(): void {
+    try {
+      const pb: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+      let text: string = '';
+      try {
+        const data: pasteboard.PasteData = pb.getDataSync();
+        if (data !== undefined && data.getPrimaryText() !== undefined) {
+          text = data.getPrimaryText();
+        }
+      } catch (e) {
+        promptAction.showToast({ message: '读取剪贴板失败' });
+        return;
+      }
+      if (text.length === 0) {
+        promptAction.showToast({ message: '剪贴板是空的' });
+        return;
+      }
+      this.lastClipboardText = text;
+      this.lastClipboardChange = pb.getChangeCount();
+      const rc: number = RustDesk.clipboardSend(text);
+      promptAction.showToast({
+        message: rc === 0 ? `已同步 ${text.length} 个字符` : '剪贴板同步不可用（仅查看或已禁用）'
+      });
+    } catch (e) {
+      promptAction.showToast({ message: '读取剪贴板失败' });
     }
   }
 
@@ -437,6 +574,14 @@ struct SessionPage {
         const text: string = ev.data !== undefined ? (ev.data as string) : '';
         if (text.length > 0) {
           this.onChatIncoming(text);
+        }
+        break;
+      }
+      case 'clipboard': {
+        // 对端剪贴板 → 写入本机（写不需要权限）。回环由 lastClipboardText 拦截。
+        const text: string = ev.data !== undefined ? (ev.data as string) : '';
+        if (text.length > 0) {
+          this.onRemoteClipboard(text);
         }
         break;
       }
@@ -1591,6 +1736,20 @@ struct SessionPage {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       .margin({ left: 4 })
+
+      // 剪贴板读取权限被拒（签名 profile 无 ACL）时的兜底：PasteButton
+      // 安全控件，点击后系统授予临时免权读取窗口，把本机剪贴板发到远端。
+      // 远端 → 本机方向不受影响（写剪贴板不需要权限）。
+      if (this.pasteBlocked && this.connected) {
+        PasteButton()
+          .onClick((event: ClickEvent, result: PasteButtonOnClickResult) => {
+            if (result === PasteButtonOnClickResult.SUCCESS) {
+              this.pasteFromButton();
+            } else {
+              promptAction.showToast({ message: '安全控件点击无效，请重试' });
+            }
+          })
+      }
 
       // 操作按钮全部收进底部工具栏 —— 与 Android 一致：remote_page.dart 的
       // getBottomAppBar() 把 ✕/显示器/键盘/模式/更多都放在底栏，顶栏不放操作。

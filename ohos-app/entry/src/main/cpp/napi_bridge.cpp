@@ -364,6 +364,15 @@ napi_value JsText(napi_env env, napi_callback_info info) {
     return MakeInt(env, rustdesk_ohos_text(text.c_str()));
 }
 
+napi_value JsClipboardSend(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string text;
+    if (argc < 1 || !GetStringArg(env, args[0], text)) return MakeInt(env, -1);
+    return MakeInt(env, rustdesk_ohos_clipboard_send(text.c_str()));
+}
+
 napi_value JsKey(napi_env env, napi_callback_info info) {
     // 7 个参数：name, down, press, alt, ctrl, shift, command
     size_t argc = 7;
@@ -780,6 +789,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"mouse", nullptr, JsMouse, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"key", nullptr, JsKey, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"text", nullptr, JsText, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"clipboardSend", nullptr, JsClipboardSend, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"ctrlAltDel", nullptr, JsCtrlAltDel, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"switchDisplay", nullptr, JsSwitchDisplay, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"localOptionGet", nullptr, JsLocalOptionGet, nullptr, nullptr, nullptr, napi_default, nullptr},

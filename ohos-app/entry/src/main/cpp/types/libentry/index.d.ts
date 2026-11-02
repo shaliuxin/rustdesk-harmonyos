@@ -68,6 +68,10 @@ export interface RustDeskNative {
   // 不吃键位布局）。退格等控制键仍走 key()。
   text(value: string): number;
 
+  // 剪贴板同步：把本机剪贴板文本发给对端（pasteboard on('update') 回调）。
+  // 0 = 已发出；负数 = 无会话 / 仅查看 / 剪贴板被禁用。
+  clipboardSend(value: string): number;
+
   // 代理设置：{"proxy","username","password"}。代理不在 options map 里，
   // 存在 Config2.socks，所以单独一对接口。
   proxyJson(): string | null;

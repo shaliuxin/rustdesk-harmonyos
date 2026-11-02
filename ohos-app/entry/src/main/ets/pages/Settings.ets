@@ -2,6 +2,7 @@ import { promptAction, router } from '@kit.ArkUI';
 import { RustDesk, ServerConfig } from '../common/RustDesk';
 import { isPhoneForm } from '../common/DeviceForm';
 import { appVersionLabel } from '../common/Version';
+import { deviceInfo } from '@kit.BasicServicesKit';
 
 // 设置页。
 //
@@ -508,9 +509,10 @@ export struct SettingsPage {
     .margin({ bottom: 10 })
   }
 
-  build() {
-    Column() {
-      Scroll() {
+  // 设置页滚动内容。抽成 Builder 是为了按系统版本条件链 enableScrollWithMouse：
+  // 它是 API 26 的属性，低版本设备上链了会在打开设置页时崩。
+  @Builder
+  settingsBody() {
         Column() {
           // ==================== 1. Account ====================
           // Android 这一组依赖账号服务（OIDC + userModel），鸿蒙版不接账号，
@@ -817,14 +819,20 @@ export struct SettingsPage {
             .margin({ bottom: 32 })
         }
         .width('100%')
-      }
+  }
+
+  build() {
+    Column() {
+      if (deviceInfo.sdkApiVersion >= 26) {
+        Scroll() { this.settingsBody() }
       .layoutWeight(1)
-      // 桌面形态（2in1 / PC）给一条常驻滚动条，并且允许「按住左键拖动」滚动：
-      // ArkUI 的 Scroll 默认只认滚轮和触摸，鼠标拖拽是关掉的（enableScrollWithMouse
-      // 默认 false，API 26 起才提供），开关不打开就是「能滚轮、不能拖」。
-      // 手机形态保持不显示滚动条，避免占内容宽度。
       .scrollBar(this.isPhone ? BarState.Off : BarState.On)
       .enableScrollWithMouse(true)
+      } else {
+        Scroll() { this.settingsBody() }
+      .layoutWeight(1)
+      .scrollBar(this.isPhone ? BarState.Off : BarState.On)
+      }
     }
     .width('100%')
     .height('100%')

@@ -44,11 +44,15 @@
           "when": "always"
         }
       }
-      // 剪贴板同步（M2）需要下面这条，它是 system_basic 级，普通应用得在
-      // module.json5 的 requestPermissions 里加上、并在签名 profile 里申请 ACL，
-      // 否则安装就会被拒。M1 用不到，先注释掉，避免一开始就装不上。
-      //
-      // { "name": "ohos.permission.READ_PASTEBOARD", ... }
+      // 剪贴板读取（READ_PASTEBOARD）**故意不声明**：
+      // 它是 system_basic 级 user_grant，签名 profile 必须带 ACL
+      // （acls.allowed-acls），没配 ACL 时安装直接被拒（9568289）。
+      // 当前签名链路（DevEco 自动签名 / AGC 发布 profile）都没有 ACL，
+      // 所以读方向降级为 PasteButton 安全控件：用户点一下即获得临时
+      // 免权读取窗口（官方机制，无需声明、无需 ACL）。
+      // 若日后在 AGC 申请到 ACL，把 READ_PASTEBOARD 加回 requestPermissions
+      // 并恢复 SessionPage.requestPastePermission 的自动同步路径即可
+      // （代码已就位，删掉这段注释重新声明就能装）。
     ]
   }
 }

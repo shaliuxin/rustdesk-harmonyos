@@ -1092,6 +1092,63 @@ pub extern "C" fn rustdesk_ohos_text(text: *const c_char) -> c_int {
     }
 }
 
+/// 把本机剪贴板文本发给对端（ArkTS pasteboard 的 `on('update')` 回调走这里）。
+///
+/// 协议格式与上游 `clipboard::get_clipboards_msg` 一致：
+/// `MultiClipboards`（一条纯文本，超阈值先 zstd 压缩），对端老版本也能收
+/// （`get_msg_if_not_support_multi_clip` 在发送侧处理，单会话直接走 MultiClipboards
+/// 与 Android 主控相同）。
+///
+/// 回环去重不在这里做：ArkTS 侧写入远端内容时已把 lastClipboardText 同步更新，
+/// `on('update')` 读到相同内容根本不会调进来。
+///
+/// 返回：0 成功；ERR_NO_SESSION 无会话；ERR_INVALID_ARG 空文本/仅视图模式/
+/// 剪贴板被禁用（后两种调用方应静默忽略，属于正常业务分支）。
+#[no_mangle]
+pub extern "C" fn rustdesk_ohos_clipboard_send(text: *const c_char) -> c_int {
+    use base::message_proto::{Clipboard, ClipboardFormat, Message, MultiClipboards};
+
+    let text = match cstr_arg(text) {
+        Some(v) => v,
+        None => return set_error("clipboard_send: text is null"),
+    };
+    if text.is_empty() {
+        return 0;
+    }
+    // 会话侧开关：仅查看 / 剪贴板被禁用都不发（上游 io_loop 收到也会被
+    // clipboard_allowed 过滤，这里直接不发省一次序列化）。
+    let allowed = session::with_session(|s| {
+        let lc = s.lc.read().unwrap();
+        !lc.disable_clipboard.v && !lc.view_only.v
+    });
+    if allowed != Some(true) {
+        return ERR_INVALID_ARG;
+    }
+    let content = text.into_bytes();
+    let compressed = hbb_common::compress::compress(&content);
+    let use_compress = compressed.len() < content.len();
+    let mut mcb = MultiClipboards::new();
+    let mut cb = Clipboard::new();
+    // prost 生成的普通字段直接赋值（oneof 的 set_multi_clipboards 才有 setter）。
+    cb.format = ClipboardFormat::Text.into();
+    cb.compress = use_compress;
+    if use_compress {
+        cb.content = compressed.into();
+    } else {
+        cb.content = content.into();
+    }
+    mcb.clipboards.push(cb);
+    let mut msg = Message::new();
+    msg.set_multi_clipboards(mcb);
+    match session::with_session(|s| {
+        use crate::client::Interface as _;
+        s.send(crate::client::Data::Message(msg));
+    }) {
+        Some(()) => 0,
+        None => ERR_NO_SESSION,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn rustdesk_ohos_ctrl_alt_del() -> c_int {
     match session::with_session(|s| s.ctrl_alt_del()) {

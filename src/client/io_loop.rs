@@ -1891,6 +1891,19 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                         #[cfg(target_os = "android")]
                         crate::clipboard::handle_msg_clipboard(cb);
+                        // 鸿蒙主控：与 iOS 一致，把文本解出来直接推给 UI 层
+                        // （ArkTS 用 pasteboard 写本机剪贴板）。
+                        #[cfg(target_env = "ohos")]
+                        {
+                            let content = if cb.compress {
+                                hbb_common::compress::decompress(&cb.content)
+                            } else {
+                                cb.content.into()
+                            };
+                            if let Ok(content) = String::from_utf8(content) {
+                                self.handler.clipboard(content);
+                            }
+                        }
                     }
                 }
                 Some(message::Union::MultiClipboards(_mcb)) => {
@@ -1935,6 +1948,24 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                         #[cfg(target_os = "android")]
                         crate::clipboard::handle_msg_multi_clipboards(_mcb);
+                        // 鸿蒙主控：取纯文本那一条（其余格式不支持），解压后推 UI。
+                        #[cfg(target_env = "ohos")]
+                        {
+                            if let Some(cb) = _mcb
+                                .clipboards
+                                .iter()
+                                .find(|c| c.format.enum_value() == Ok(ClipboardFormat::Text))
+                            {
+                                let content = if cb.compress {
+                                    hbb_common::compress::decompress(&cb.content)
+                                } else {
+                                    cb.content.to_vec()
+                                };
+                                if let Ok(content) = String::from_utf8(content) {
+                                    self.handler.clipboard(content);
+                                }
+                            }
+                        }
                     }
                 }
                 #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
