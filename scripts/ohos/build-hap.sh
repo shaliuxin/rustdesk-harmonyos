@@ -9,15 +9,15 @@
 # 前置：先跑 build-core.sh（两架构核心库就位）。本脚本不编 Rust，只调 hvigorw。
 # 产物：
 #   hap → ohos-app/entry/build/default/outputs/default/entry-default-signed.hap
-#   app → ohos-app/build/outputs/default/*.app
+#   app → ohos-app/build/outputs/release/*-signed.app
 #
 # 为什么需要本脚本：hvigorw 需要 JAVA_HOME / DEVECO_SDK_HOME 都在环境里，
 # 少任何一个就报 00303217（找不到 SDK）。路径都是 DevEco 默认安装位置，
 # 装在别处时用环境变量覆盖。
 #
-# 注意：HAP 与 .app 用的是 build-profile.json5 里同一个 signingConfig ——
-# 上架前必须把 material 换成**发布证书 + 发布 Profile**，否则打出来的包里
-# 是调试签名，AGC 会拒收。
+# 签名：build-profile.json5 里有两个 signingConfig（default=调试 / release=
+# 发布），对应同名 product。hap 打调试签名（可侧载真机），app 打发布签名
+# （AGC 拒收调试签名包，反之发布签名不能侧载真机）。
 set -euo pipefail
 
 KIND="${1:-hap}"
@@ -39,12 +39,15 @@ export PATH="$DEV_POSIX/tools/hvigor/bin:$DEV_POSIX/jbr/bin:$PATH"
 cd "$ROOT/ohos-app"
 
 if [[ "$KIND" == "hap" ]]; then
+  # 调试产品：调试签名（绑定设备 UDID），可侧载真机。
   hvigorw assembleHap --mode module -p product=default
   ART="$ROOT/ohos-app/entry/build/default/outputs/default/entry-default-signed.hap"
 else
-  # .app 是「应用包」（App Pack），AGC 上传用的是这个，不是 HAP。
-  hvigorw assembleApp --mode project -p product=default -p buildMode=release
-  ART="$(ls -t "$ROOT"/ohos-app/build/outputs/default/*.app 2>/dev/null | head -1 || true)"
+  # 发布产品：发布签名。.app 是「应用包」（App Pack），AGC 上传用的是这个。
+  # 注意发布签名包不能侧载真机（9568322 not trusted），真机调试用 hap。
+  hvigorw assembleApp --mode project -p product=release -p buildMode=release
+  # 按 product 名落对应子目录（default/release）。
+  ART="$(ls -t "$ROOT"/ohos-app/build/outputs/*/*.app 2>/dev/null | grep -v unsigned | head -1 || true)"
 fi
 
 if [[ -n "${ART:-}" && -f "$ART" ]]; then

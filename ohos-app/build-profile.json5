@@ -1,25 +1,29 @@
-// 华为调试签名（由 DevEco CLI `devecocli signature generate --type debug` 生成）。
+// 双签名配置：调试（真机侧载）+ 发布（AGC 上架），由 build-hap.sh 按
+// hap/app 自动选产品，不再需要手工换 material。
 //
 // 为什么用华为签名而不是 OpenHarmony 自签：自签证书只有模拟器认，装到华为
 // 商用真机会在 `hdc install` 阶段报 `code:9568257 fail to verify pkcs7`。
+// 反过来，发布签名包**不能**侧载真机（9568322 not trusted）——真机调试
+// 只认绑定设备 UDID 的调试签名，上架只认发布签名，两边各一份配置。
 //
 // 注意下面几条都是**本机**绑定的：
-//   - certpath/profile/storeFile 是绝对路径，指向 ~/.ohos/config/
 //   - storePassword/keyPassword 是 DevEco 的加密格式（十六进制串），明文由
-//     ~/.ohos/config/material/ 里的密钥解开，hvigor 不接受明文
-// 换机器或换用户目录时必须重新执行一次 `devecocli signature generate`，
-// 它会重写本文件的 material 段。
+//     ~/.ohos/config/material/ 里的密钥解开，hvigor 不接受明文；换机器或
+//     换用户目录时必须重新执行一次自动签名/手动签名流程，重写这两个段。
+//   - 发布材料在 OneDrive（shaliuxin.p12 / RemoteDesk Release.p7b / cer）。
+//   - 剪贴板 READ_PASTEBOARD 是 system_basic 受限权限：等 AGC 的 ACL 申请
+//     通过后，**重建** Profile（勾「受限ACL权限」）并更新下面 profile 路径，
+//     allowed-acls 才会包含它（module.json5 里的声明已就位）。
 //
-// compatibleSdkVersion 与本机 SDK 对齐。如果你装的不是 API 26，只改这一行
-// （例如 '5.0.5(17)'），其余不用动。
-// 兼容下限已降到 HarmonyOS 5.0.0（API 12，HarmonyOS NEXT 首个商用版本）：
-// native 层所有 12 以上的 NDK 符号（InjectMouseEventGlobal=20、
+// compatibleSdkVersion 已降到 HarmonyOS 5.0.0（API 12，HarmonyOS NEXT 首个
+// 商用版本）：native 层所有 12 以上的 NDK 符号（InjectMouseEventGlobal=20、
 // CreateAllDisplays=14、RequestInjection=20）都走 dlsym 延迟绑定并带降级，
 // 见 entry/src/main/cpp/ohos_abi.cpp；ArkTS 层未用 12 以上的接口。
 {
   app: {
     signingConfigs: [
       {
+        // 调试：DevEco 自动签名材料（绑定本机 + 设备 UDID）。
         "name": "default",
         "type": "HarmonyOS",
         "material": {
@@ -31,12 +35,39 @@
           "storeFile": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_5r4oPR_nulwB9AdPEUw3xx1YPUtczNaz7kSD333llOA=.p12",
           "storePassword": "0000001BB754D016186F40D3F8CA309B6C0DF389658A314B4459C67B48D9C0DCBAE8464E29DA68B7F3CEF9"
         }
+      },
+      {
+        // 发布：AGC 上架用（发布证书 + 发布 Profile，含人工申请的发布材料）。
+        "name": "release",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "C:/Users/mingh/OneDrive/RustDesk for HarmonyOS/shaliuxin.p12",
+          "storePassword": "00000019033A62280CBC3BEB5A605B48307DD786F63499069776A931EEF05667204DE1DF5A3F24DF33",
+          "keyAlias": "21554327",
+          "keyPassword": "000000190803E9F791EEECF2634EEE1AD69BD2A78487DF1BDCE9B3B067F910AD76B5A2A8499011C210",
+          "signAlg": "SHA256withECDSA",
+          "profile": "C:/Users/mingh/OneDrive/RustDesk for HarmonyOS/RemoteDesk for HarmonyOSRelease.p7b",
+          "certpath": "C:/Users/mingh/OneDrive/RustDesk for HarmonyOS/RustDesk for HarmonyOS.cer"
+        }
       }
     ],
     products: [
       {
         name: 'default',
         signingConfig: 'default',
+        compatibleSdkVersion: '5.0.0(12)',
+        runtimeOS: 'HarmonyOS',
+        buildOption: {
+          strictMode: {
+            caseSensitiveCheck: true,
+            useNormalizedOHMUrl: true,
+          },
+        },
+        targetSdkVersion: '26.0.0',
+      },
+      {
+        name: 'release',
+        signingConfig: 'release',
         compatibleSdkVersion: '5.0.0(12)',
         runtimeOS: 'HarmonyOS',
         buildOption: {
@@ -66,6 +97,7 @@
           name: 'default',
           applyToProducts: [
             'default',
+            'release',
           ],
         },
       ],
