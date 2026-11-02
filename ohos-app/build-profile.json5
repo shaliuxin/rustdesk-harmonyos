@@ -16,18 +16,18 @@
   app: {
     signingConfigs: [
       {
-        name: 'default',
-        type: 'HarmonyOS',
-        material: {
-          certpath: 'C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_nX4pg7Tb93Wryzggss7dA95jMegOZ1xSGFlv4E0udAA=.cer',
-          keyAlias: 'debugKey',
-          keyPassword: '0000001a0a788f8695b8afe1a2ebede694c4ceb31c4b78d58c4f231db19aef04eff7eb6dac01fa0ca6ac',
-          profile: 'C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_nX4pg7Tb93Wryzggss7dA95jMegOZ1xSGFlv4E0udAA=.p7b',
-          signAlg: 'SHA256withECDSA',
-          storeFile: 'C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_nX4pg7Tb93Wryzggss7dA95jMegOZ1xSGFlv4E0udAA=.p12',
-          storePassword: '0000001a0a788f8695b8afe1a2ebede694c4ceb31c4b78d58c4f231db19aef04eff7eb6dac01fa0ca6ac',
-        },
-      },
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_5r4oPR_nulwB9AdPEUw3xx1YPUtczNaz7kSD333llOA=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B8453EFA6A0341056BC5D3C394B6267F261E58085CEE0A6A990F39138408389E8A47BB059C91E03",
+          "profile": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_5r4oPR_nulwB9AdPEUw3xx1YPUtczNaz7kSD333llOA=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_5r4oPR_nulwB9AdPEUw3xx1YPUtczNaz7kSD333llOA=.p12",
+          "storePassword": "0000001BB754D016186F40D3F8CA309B6C0DF389658A314B4459C67B48D9C0DCBAE8464E29DA68B7F3CEF9"
+        }
+      }
     ],
     products: [
       {
