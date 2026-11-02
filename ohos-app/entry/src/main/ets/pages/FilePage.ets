@@ -943,11 +943,38 @@ struct FilePage {
           .backgroundColor(C_LINE)
           .onClick(() => { this.showJobs = !this.showJobs; })
       }
+
+      // 断开按钮：离开本页本来就会关会话（aboutToDisappear 里 closeSession），
+      // 但用户需要一个明确的「断开」动作，而不是只能返回或杀程序。
+      Text('断开')
+        .fontSize(13)
+        .fontColor('#FF7B72')
+        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+        .borderRadius(8)
+        .borderWidth(1)
+        .borderColor('#5A2C2C')
+        .margin({ left: this.jobs.length > 0 ? 8 : 0 })
+        .onClick(() => { this.disconnect(); })
     }
     .width('100%')
     .height(52)
     .padding({ left: 4, right: 12 })
     .backgroundColor(C_BG)
+  }
+
+  /**
+   * 主动断开文件传输会话并退出本页。
+   *
+   * closeSession 先行：让「已断开」是本次点击的直接结果，而不是靠
+   * aboutToDisappear 兜底（session::close 幂等，重复调用无副作用）。
+   */
+  private disconnect(): void {
+    hilog.info(DOMAIN, TAG, 'user disconnect file transfer peer=%{public}s', this.peerId);
+    RustDesk.closeSession();
+    this.connected = false;
+    this.failed = false;
+    this.statusText = '已断开';
+    router.back();
   }
 
   @Builder

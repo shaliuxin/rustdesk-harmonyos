@@ -621,19 +621,36 @@ pub extern "C" fn rustdesk_ohos_set_permanent_password(pw: *const c_char) -> c_i
 
 /// 最近连接过的对端列表（首页「最近会话」用）。
 ///
-/// 形如 `[{"id":"123456789","ts":1730000000,"fav":false}, ...]`，按最后连接时间
-/// **倒序**（最近的在前）。`ts` 是 Unix 秒。
+/// 形如 `[{"id":"123456789","name":"NovaStudio","ts":1730000000,"fav":false}, ...]`，
+/// 按最后连接时间**倒序**（最近的在前）。`ts` 是 Unix 秒。
+///
+/// `name` 是给用户看的设备名：别名（alias）优先，其次主机名，全空时回退到
+/// ID —— 只显示一串数字 ID 根本分不清是哪台机器。（不带用户名：行上还有
+/// ID 和时间，再拼用户名只会更挤。）
 #[no_mangle]
 pub extern "C" fn rustdesk_ohos_peers_json() -> *mut c_char {
     let favs = crate::ui_interface::get_fav();
     let mut arr: Vec<serde_json::Value> = Vec::new();
-    for (id, t, _cfg) in config::PeerConfig::peers(None) {
+    for (id, t, cfg) in config::PeerConfig::peers(None) {
         let ts = t
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        let alias = cfg
+            .options
+            .get("alias")
+            .cloned()
+            .unwrap_or_else(|| String::new());
+        let name = if !alias.is_empty() {
+            alias
+        } else if !cfg.info.hostname.is_empty() {
+            cfg.info.hostname.clone()
+        } else {
+            id.clone()
+        };
         arr.push(json!({
             "id": id,
+            "name": name,
             "ts": ts,
             "fav": favs.contains(&id),
         }));

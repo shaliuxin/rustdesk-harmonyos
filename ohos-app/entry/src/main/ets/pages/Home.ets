@@ -354,7 +354,12 @@ struct Home {
     const next: PeerInfo[] = [];
     for (let i = 0; i < this.peers.length; i++) {
       if (this.peers[i].id === p.id) {
-        next.push({ id: this.peers[i].id, ts: this.peers[i].ts, fav: !this.peers[i].fav });
+        next.push({
+          id: this.peers[i].id,
+          name: this.peers[i].name,
+          ts: this.peers[i].ts,
+          fav: !this.peers[i].fav
+        });
       } else {
         next.push(this.peers[i]);
       }
@@ -447,24 +452,39 @@ struct Home {
   peerRow(p: PeerInfo) {
     Row() {
       Column() {
-        Text(p.id)
+        Text(p.name)
           .fontSize(16)
-          .fontColor(C_ID)
-          .fontFamily('monospace')
+          .fontColor(C_TEXT)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.fmtTime(p.ts))
-          .fontSize(12)
-          .fontColor(C_FAINT)
-          .margin({ top: 2 })
+        Row({ space: 6 }) {
+          Text(p.id)
+            .fontSize(12)
+            .fontColor(C_ID)
+            .fontFamily('monospace')
+          Text('·')
+            .fontSize(12)
+            .fontColor(C_FAINT)
+          Text(this.fmtTime(p.ts))
+            .fontSize(12)
+            .fontColor(C_FAINT)
+        }
+        .margin({ top: 2 })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
+      // 直达文件传输：长按菜单没人发现得了，文件传输是高频操作，
+      // 必须在行上有个可见的入口（点行体仍然是直接远程控制）。
+      Text('📁')
+        .fontSize(18)
+        .padding({ left: 10, right: 6, top: 4, bottom: 4 })
+        .onClick(() => { this.openFiles(p.id); })
+
       Text(p.fav ? '★' : '☆')
         .fontSize(22)
         .fontColor(p.fav ? '#FFC53D' : C_FAINT)
-        .padding({ left: 10, right: 4, top: 4, bottom: 4 })
+        .padding({ left: 4, right: 4, top: 4, bottom: 4 })
         .onClick(() => { this.toggleFav(p); })
     }
     .width('100%')
@@ -473,8 +493,7 @@ struct Home {
     .borderRadius(13)
     .margin({ bottom: 10 })
     .onClick(() => { this.connect(p.id); })
-    // 长按出菜单：一个设备行上塞不下「连接 / 文件传输」两个按钮，
-    // 长按是手机上最省地方的做法（点按仍然是直接连接）。
+    // 长按出菜单是备用路径：远程控制 / 文件传输二选一。
     .gesture(LongPressGesture().onAction(() => {
       this.showPeerMenu(p.id);
     }))

@@ -543,6 +543,12 @@ export class RustDesk {
     }
     try {
       const arr: PeerInfo[] = JSON.parse(json) as PeerInfo[];
+      // 旧版核心的输出没有 name 字段，兜底回退到 ID，UI 不用判空。
+      for (let i = 0; i < arr.length; i++) {
+        if (arr[i].name === undefined || arr[i].name.length === 0) {
+          arr[i].name = arr[i].id;
+        }
+      }
       return arr ?? [];
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'bad peers json: %{public}s', json);
@@ -743,6 +749,7 @@ export class RustDesk {
 // 最近会话里的一项。字段与 Rust 侧 rustdesk_ohos_peers_json 的输出一致。
 export interface PeerInfo {
   id: string;
+  name: string; // 显示用设备名：别名 > 主机名/用户名 > ID（见 entry.rs peers_json）
   ts: number;   // 最后连接时间，Unix 秒
   fav: boolean; // 是否已收藏
 }
