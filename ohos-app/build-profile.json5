@@ -11,6 +11,9 @@
 //     ~/.ohos/config/material/ 里的密钥解开，hvigor 不接受明文；换机器或
 //     换用户目录时必须重新执行一次自动签名/手动签名流程，重写这两个段。
 //   - 发布材料在 OneDrive（shaliuxin.p12 / RemoteDesk Release.p7b / cer）。
+//   - ⚠ 包名已改为 cn.shaliuxin.remotedesk（原 harmonyremote）。**p7b 里绑定包名**：
+//     必须用新包名在 AGC 重建发布 Profile 并重新下载、更新下面 profile/certpath；
+//     调试侧的 default_*.p7b 也要在 DevEco 重跑一次自动签名，否则打包签名失败。
 //   - 剪贴板 READ_PASTEBOARD 是 system_basic 受限权限：等 AGC 的 ACL 申请
 //     通过后，**重建** Profile（勾「受限ACL权限」）并更新下面 profile 路径，
 //     allowed-acls 才会包含它（module.json5 里的声明已就位）。

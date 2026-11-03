@@ -182,7 +182,7 @@ struct Home {
           .fontColor(C_TEXT)
           .width('100%')
           .margin({ bottom: 12 })
-        Text('RemoteDesk 是基于开源 RustDesk 的远程桌面工具。\n\n'
+        Text('RemoteDesk for HarmonyOS 是基于开源 RustDesk 的远程桌面工具。\n\n'
           + '我们不收集你的个人信息，也不向第三方提供任何数据。'
           + '设备 ID、服务器配置与连接记录只保存在本机；'
           + '远程画面与文件在设备之间端到端加密传输。\n\n'
@@ -1024,7 +1024,7 @@ struct Home {
     Column() {
       // AppBar：Android 是居中标题 + 右侧动作。这里放一个刷新（回读 ID/密码/列表）。
       Row() {
-        Text('RemoteDesk')
+        Text('RemoteDesk for HarmonyOS')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor(C_TEXT)

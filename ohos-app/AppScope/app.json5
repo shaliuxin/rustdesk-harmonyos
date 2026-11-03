@@ -2,7 +2,11 @@
   "app": {
     // 包名里不能出现 ohos —— 它是华为保留字，AGC 建应用时直接拒（
     // "应用包名中包含敏感词或者保留字符"）。上架后包名永久不可改。
-    "bundleName": "cn.shaliuxin.harmonyremote",
+    // 品牌词用 remotedesk 与程序名 "RemoteDesk for HarmonyOS" 对齐：
+    // 曾用 cn.shaliuxin.harmonyremote（含 harmony 易被审核判为与程序名不一致）。
+    // 改包名后，**调试与发布签名 Profile 都要按新包名重建**（p7b 里绑定了包名），
+    // 否则 hvigor 打包会签名失败；AGC 侧需用新包名新建应用（旧包名不可改）。
+    "bundleName": "cn.shaliuxin.remotedesk",
     "vendor": "shaliuxin",
     "versionCode": 105,
     "versionName": "0.1.5",
