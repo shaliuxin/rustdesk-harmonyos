@@ -143,7 +143,7 @@ struct Privacy {
       Scroll() {
         Column() {
           Column() {
-            Text('RemoteDesk for HarmonyOS 隐私政策')
+            Text('RustDesk 隐私政策')
               .fontSize(20)
               .fontWeight(FontWeight.Bold)
               .fontColor(C_TEXT)

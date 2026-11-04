@@ -1,6 +1,11 @@
 // 双签名配置：调试（真机侧载）+ 发布（AGC 上架），由 build-hap.sh 按
 // hap/app 自动选产品，不再需要手工换 material。
 //
+// ⚠ 当前状态（2026-11-04）：**不再上架应用市场**，程序显示名已改回 "RustDesk"。
+//   日常构建只用 default 产品（调试/测试证书，绑设备 UDID 可侧载真机）：
+//       bash scripts/ohos/build-hap.sh        # 或 build-hap.sh hap
+//   下面的 release 段保留备用，不参与日常构建。
+//
 // 为什么用华为签名而不是 OpenHarmony 自签：自签证书只有模拟器认，装到华为
 // 商用真机会在 `hdc install` 阶段报 `code:9568257 fail to verify pkcs7`。
 // 反过来，发布签名包**不能**侧载真机（9568322 not trusted）——真机调试
@@ -11,9 +16,9 @@
 //     ~/.ohos/config/material/ 里的密钥解开，hvigor 不接受明文；换机器或
 //     换用户目录时必须重新执行一次自动签名/手动签名流程，重写这两个段。
 //   - 发布材料在 OneDrive（shaliuxin.p12 / RemoteDesk Release.p7b / cer）。
-//   - ⚠ 包名已改为 cn.shaliuxin.remotedesk（原 harmonyremote）。**p7b 里绑定包名**：
-//     必须用新包名在 AGC 重建发布 Profile 并重新下载、更新下面 profile/certpath；
-//     调试侧的 default_*.p7b 也要在 DevEco 重跑一次自动签名，否则打包签名失败。
+//   - 包名已定为 cn.shaliuxin.remotedesk（原 harmonyremote，含保留词被拒）。
+//     **p7b 里绑定包名**，故调试侧 default_*.p7b 已按此包名重生成（2026-11-03 验证通过）。
+//     今后若再改包名，调试与发布 Profile 都必须按新包名重建，否则签名失败。
 //   - 剪贴板 READ_PASTEBOARD 是 system_basic 受限权限：等 AGC 的 ACL 申请
 //     通过后，**重建** Profile（勾「受限ACL权限」）并更新下面 profile 路径，
 //     allowed-acls 才会包含它（module.json5 里的声明已就位）。
@@ -26,31 +31,29 @@
   app: {
     signingConfigs: [
       {
-        // 调试：DevEco 自动签名材料（绑定本机 + 设备 UDID）。
         "name": "default",
         "type": "HarmonyOS",
         "material": {
           "certpath": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_5r4oPR_nulwB9AdPEUw3xx1YPUtczNaz7kSD333llOA=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001B8453EFA6A0341056BC5D3C394B6267F261E58085CEE0A6A990F39138408389E8A47BB059C91E03",
+          "keyPassword": "0000001A460A502CEFABAF178BCBD5BC0910B4DAA8E9A4EF0022988F14124B27DA370841695E728C6552",
           "profile": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_5r4oPR_nulwB9AdPEUw3xx1YPUtczNaz7kSD333llOA=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_5r4oPR_nulwB9AdPEUw3xx1YPUtczNaz7kSD333llOA=.p12",
-          "storePassword": "0000001BB754D016186F40D3F8CA309B6C0DF389658A314B4459C67B48D9C0DCBAE8464E29DA68B7F3CEF9"
+          "storePassword": "0000001A78B918CDCA8EDD57459D9CF18E1CC4B3F2AEC8CAD96D9566CA0D795E6FEA96F38B794C1B4E73"
         }
       },
       {
-        // 发布：AGC 上架用（发布证书 + 发布 Profile，含人工申请的发布材料）。
         "name": "release",
         "type": "HarmonyOS",
         "material": {
           "storeFile": "C:/Users/mingh/OneDrive/RustDesk for HarmonyOS/shaliuxin.p12",
-          "storePassword": "00000019033A62280CBC3BEB5A605B48307DD786F63499069776A931EEF05667204DE1DF5A3F24DF33",
+          "storePassword": "0000001937246BBC87A5E9E00167573BEE331FAB74D23A24F74C7343810DEEF3FEF2FB20460E9F40D8",
           "keyAlias": "21554327",
-          "keyPassword": "000000190803E9F791EEECF2634EEE1AD69BD2A78487DF1BDCE9B3B067F910AD76B5A2A8499011C210",
+          "keyPassword": "00000019CA4B9C00F72F2BF7A4775EEF87ECC7CC65474E1F5E4F23D098DBE3A5E5080E76616D5F4A00",
           "signAlg": "SHA256withECDSA",
-          "profile": "C:/Users/mingh/OneDrive/RustDesk for HarmonyOS/RemoteDesk for HarmonyOSRelease.p7b",
-          "certpath": "C:/Users/mingh/OneDrive/RustDesk for HarmonyOS/RustDesk for HarmonyOS.cer"
+          "profile": "C:/Users/mingh/OneDrive/RustDesk for HarmonyOS/RustDesk for HarmonyOSRelease.p7b",
+          "certpath": "C:/Users/mingh/OneDrive/RustDesk for HarmonyOS/RemoteDesk for HarmonyOS.cer"
         }
       }
     ],

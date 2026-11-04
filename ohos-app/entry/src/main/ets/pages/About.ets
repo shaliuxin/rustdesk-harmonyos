@@ -138,7 +138,7 @@ struct About {
         Column() {
           // --- 品牌区 ---
           Column() {
-            Text('RemoteDesk for HarmonyOS')
+            Text('RustDesk')
               .fontSize(28)
               .fontWeight(FontWeight.Bold)
               .fontColor(C_ACCENT)
@@ -233,7 +233,7 @@ struct About {
           .borderRadius(13)
           .margin({ bottom: 20 })
 
-          Text('RemoteDesk for HarmonyOS 是基于开源 RustDesk 的鸿蒙远程桌面客户端。\n'
+          Text('本应用是开源 RustDesk 的鸿蒙远程桌面客户端。\n'
             + '支持远程控制、文件传输与共享屏幕（平板/PC 形态）。')
             .fontSize(12)
             .fontColor(C_FAINT)
