@@ -1,6 +1,6 @@
 [package]
 name = "rustdesk"
-version = "1.5.1"
+version = "1.5.3"
 authors = ["rustdesk <info@rustdesk.com>"]
 edition = "2021"
 build= "build.rs"
@@ -140,6 +140,8 @@ winapi = { version = "0.3", features = [
     "winspool",
 ] }
 windows = { version = "0.61", features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
     "Win32",
     "Win32_Foundation",
     "Win32_Security",
@@ -156,6 +158,7 @@ windows = { version = "0.61", features = [
     "Win32_System_Registry",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
@@ -301,7 +304,7 @@ os-version = "0.2"
 [dev-dependencies]
 hound = "3.5"
 docopt = "1.1"
-tokio = "1.44"
+tokio = { version = "1.44", features = ["test-util"] }
 
 [package.metadata.bundle]
 name = "RustDesk"
@@ -321,6 +324,12 @@ rpath = true
 [profile.dev]
 debug = 1
 
+# sciter-rs transmutes OR'ed flags into fieldless enums; rustc's debug-build
+# enum check aborts on them (release builds never had the check).
+# （上游 1.5.3 新增：修 debug build 的 enum check abort）
+[profile.dev.package.sciter-rs]
+debug-assertions = false
+
 # OHOS: magnum-opus 的 build.rs 用编译期 `#[cfg(target_os = "linux")]` 判断是否走 pkg-config，
 # 但 build script 是在【宿主】上编译的（Windows 宿主 => target_os="windows"），永远落到 vcpkg 分支。
 # 上游只在 Linux 宿主交叉编译过，故未暴露。vendored 副本改为按 feature 分派。
@@ -332,5 +341,3 @@ magnum-opus = { path = "ohos/third_party/magnum-opus" }
 # vendored 副本把 linux 后端按 target_env 排除，并为 ohos 提供签名一致的纯空实现
 # （src/ohos），这样 src/keyboard.rs 里 160 余处 rdev:: 调用点无需任何改动。
 rdev = { path = "ohos/third_party/rdev" }
-
-

@@ -25,7 +25,7 @@ const C_FAINT: string = '#5A6478';
 const C_ACCENT: string = '#0071FF';
 const C_DIVIDER: string = '#1F2A3D';
 
-// 版本串由 common/Version.ets 统一生成：`1.5.1`（直接跟随上游 RustDesk 发行版本）。
+// 版本串由 common/Version.ets 统一生成：`1.5.3`（直接跟随上游 RustDesk 发行版本）。
 // 前半段是鸿蒙版自己的版本基数，括号里是上游 RustDesk 的核心版本。
 
 const URL_HOME: string = 'https://rustdesk.com/';

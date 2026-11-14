@@ -10,7 +10,7 @@ export interface RustDeskNative {
   // ABI 版本，启动时与 ohos-build.json 里的期望值比对，避免 .a 与胶水层错配。
   abiVersion(): number;
 
-  // 核心版本号（"1.5.1"），「关于」页显示用。
+  // 核心版本号（"1.5.3"），「关于」页显示用。
   version(): string | null;
 
   // 必须在其他调用之前执行一次。appDir 传 UIAbility 的 context.filesDir。

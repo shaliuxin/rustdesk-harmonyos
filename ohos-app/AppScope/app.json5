@@ -9,8 +9,8 @@
     // 曾用 cn.shaliuxin.harmonyremote（含 harmony 保留词）。
     "bundleName": "cn.shaliuxin.remotedesk",
     "vendor": "shaliuxin",
-    "versionCode": 10501,
-    "versionName": "1.5.1",
+    "versionCode": 10503,
+    "versionName": "1.5.3",
     "icon": "$media:app_icon",
     "label": "$string:app_name",
     "minAPIVersion": 12,

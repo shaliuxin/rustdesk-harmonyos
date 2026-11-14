@@ -1,6 +1,6 @@
 {
   "name": "entry",
-  "version": "1.5.1",
+  "version": "1.5.3",
   "description": "RustDesk 主控/被控入口",
   "main": "",
   "author": "",

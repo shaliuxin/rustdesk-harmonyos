@@ -54,7 +54,10 @@ CXXFLAGS_x86_64_unknown_linux_ohos = "--target=x86_64-linux-ohos --sysroot=C:/oh
 # --- 第三方 C 库查找：vpx / aom / libyuv / opus 均由 ohos/build-third-party 交叉编译到该前缀 ---
 # 注意：PKG_CONFIG_PATH 是全局的（cargo [env] 不支持按 target 区分），
 # x86_64 构建时由 scripts/ohos/build-core.sh 按目标架构覆盖此变量。
-PKG_CONFIG = "C:/Program Files/pkgconf-3.0.8/pkgconf.exe"
+# 不要写死 pkgconf 的带版本号目录：本机 2026-11-06 从 3.0.8 升到 3.0.10 后，
+# 旧路径直接失效，build script 报 "The pkg-config command could not be found"。
+# 交给 PATH 解析，升级 pkgconf 时无需再改这里。
+PKG_CONFIG = "pkgconf"
 PKG_CONFIG_PATH = "C:/Users/mingh/WorkBuddy/2026-10-30-16-57-08/rustdesk/ohos/sysroot/aarch64/lib/pkgconfig"
 PKG_CONFIG_ALLOW_CROSS = "1"
 # bindgen 需要自己的一份额外 clang 参数：stddef.h 等系统头只在 sysroot 里，

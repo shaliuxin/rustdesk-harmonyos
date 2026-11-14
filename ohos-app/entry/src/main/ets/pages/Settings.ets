@@ -85,7 +85,7 @@ const CODECS: ViewOption[] = [
   new ViewOption('h265', 'H265'),
 ];
 
-// 版本串统一由 common/Version.ets 生成：`1.5.1`（直接跟随上游 RustDesk 发行版本）。
+// 版本串统一由 common/Version.ets 生成：`1.5.3`（直接跟随上游 RustDesk 发行版本）。
 // 括号里是上游 RustDesk 的核心版本（native 读回，不在这里手写）。
 // 包版本（app.json5 的 versionName / versionCode）仍需与 Version.ets 的
 // OHOS_APP_VERSION 同步手动改。
@@ -172,7 +172,7 @@ export struct SettingsPage {
   private statusTimer: number = -1;
   // 手机形态：隐藏「共享屏幕」（被控端）相关设置
   @State isPhone: boolean = false;
-  // 版本串（`1.5.1`），aboutToAppear 里取一次。
+  // 版本串（`1.5.3`），aboutToAppear 里取一次。
   @State appVersion: string = '';
 
   aboutToAppear(): void {

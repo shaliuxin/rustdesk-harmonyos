@@ -135,6 +135,11 @@ pub fn start_conn(
         None,
         None,
         None,
+        // 上游 1.5.3 给 LoginConfigHandler::initialize 新增第 8 个参数
+        // login_method: &str。OHOS 主控端尚未暴露「登录方式」选项，传空串
+        // 走 LoginMethod::default()（与 sciter UI src/ui/remote.rs 一致），
+        // 保持 1.5.1 的行为。见 docs/ohos/ARCHITECTURE.md §7 原则 3。
+        "",
     );
     // 把设置页的「连接默认选项」灌进本会话。
     //
