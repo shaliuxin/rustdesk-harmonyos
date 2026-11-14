@@ -143,7 +143,10 @@ export struct SettingsPage {
   @State enableUdpPunch: boolean = true;
   @State enableIpv6Punch: boolean = true;
   @State enableWebrtc: boolean = true;
-  @State allowWebsocket: boolean = true;
+  // 出厂默认是 "N"（见 src/platform/ohos/entry.rs 的 FACTORY_DEFAULTS）。
+  // 这里只是首帧占位、load() 会用 native 回读值覆盖，但初值仍要一致，
+  // 否则首次渲染会先闪一下「开」再变「关」。
+  @State allowWebsocket: boolean = false;
   @State allowInsecureTls: boolean = false;
   // --- 硬件编解码 ---
   @State enableHwcodec: boolean = true;
@@ -211,6 +214,18 @@ export struct SettingsPage {
       return DOT_FAILED;
     }
     return DOT_CONNECTING;
+  }
+
+  /// 状态文字。只靠颜色传达状态对色觉障碍用户不友好，也容易让人把
+  ///「绿点」误读成「本机在线」——把含义直接写在地址后面。
+  private serverStatusText(): string {
+    if (this.serverStatus === RustDesk.SERVER_STATUS_READY) {
+      return '已连接';
+    }
+    if (this.serverStatus === RustDesk.SERVER_STATUS_FAILED) {
+      return '连接失败';
+    }
+    return '正在连接';
   }
 
   private load(): void {
@@ -571,6 +586,10 @@ export struct SettingsPage {
                 .fontColor(C_TEXT)
                 .fontFamily('monospace')
                 .layoutWeight(1)
+              Text(this.serverStatusText())
+                .fontSize(12)
+                .fontColor(this.serverStatusColor())
+                .margin({ left: 8 })
             }
             .width('100%')
             .margin({ top: 6 })

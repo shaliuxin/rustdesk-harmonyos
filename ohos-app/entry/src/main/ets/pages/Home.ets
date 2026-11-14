@@ -74,7 +74,8 @@ struct Home {
   @State effectiveServer: string = '';
   @State permPwdEditing: boolean = false;
   @State permPwd: string = '';
-  // ID 服务器连接状态（0=连接中 1=已连接 2=失败，见 RustDesk.SERVER_STATUS_*）。
+  // ID 服务器连接状态：0=正在连接、1=已连接、-1=连接失败
+  //（见 RustDesk.SERVER_STATUS_*；FAILED 是 -1，不是 2）。
   @State serverStatus: number = RustDesk.SERVER_STATUS_CONNECTING;
   // 轮询定时器；-1 表示没在跑。
   private statusTimer: number = -1;
@@ -368,6 +369,17 @@ struct Home {
       return DOT_FAILED;
     }
     return DOT_CONNECTING;
+  }
+
+  // 状态文字：与圆点同色，把颜色含义直接写出来（Settings.ets 同款）。
+  private serverStatusText(): string {
+    if (this.serverStatus === RustDesk.SERVER_STATUS_READY) {
+      return '已连接';
+    }
+    if (this.serverStatus === RustDesk.SERVER_STATUS_FAILED) {
+      return '连接失败';
+    }
+    return '正在连接';
   }
 
   // 从会话页返回时最近列表会多一条，必须刷新：页面不会重建，只有 onPageShow 会来。
@@ -995,6 +1007,10 @@ struct Home {
               .fontColor(C_TEXT)
               .fontFamily('monospace')
               .layoutWeight(1)
+            Text(this.serverStatusText())
+              .fontSize(12)
+              .fontColor(this.serverStatusColor())
+              .margin({ left: 8 })
           }
           .width('100%')
           .margin({ top: 6 })
