@@ -79,7 +79,7 @@ const SECTIONS: Section[] = [
     + '并在本页顶部标注生效日期。若涉及数据收集范围的实质性变化，会在应用内显著提示。'),
   new Section('十一、联系我们',
     '对本政策有任何疑问，可通过项目仓库提交 Issue：\n'
-    + 'github.com/shaliuxin/rustdesk-harmonyos'),
+    + 'github.com/shaliuxin/rustdesk-hmos'),
 ];
 
 @Entry

@@ -32,8 +32,8 @@ const URL_HOME: string = 'https://rustdesk.com/';
 // 隐私政策走应用内页面（pages/Privacy.ets），不再指向外部网页 ——
 // 应用市场要求应用内可查看，外链在离线/无浏览器时等于没有。
 // 项目地址：GitHub 仓库就绪前先用 lx-soft.net 占位，仓库开好后替换成真实地址。
-const URL_PROJECT: string = 'https://github.com/shaliuxin/rustdesk-harmonyos';
-const PROJECT_URL_LABEL: string = 'github.com/shaliuxin/rustdesk-harmonyos';
+const URL_PROJECT: string = 'https://github.com/shaliuxin/rustdesk-hmos';
+const PROJECT_URL_LABEL: string = 'github.com/shaliuxin/rustdesk-hmos';
 
 @Entry
 @Component
